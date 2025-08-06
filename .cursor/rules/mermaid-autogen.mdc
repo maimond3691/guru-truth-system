@@ -1,0 +1,26 @@
+---
+description: Detecting mermaid code and formatting for generate tool call
+globs: 
+alwaysApply: false
+---
+# 🖼️  Auto-render Mermaid blocks  (files: "*.md")
+
+When you detect a Markdown code fence that begins with ```mermaid
+  1. Extract the code inside the fence.
+  2. Call tool.mermaid.generate with:
+        {
+          "code": "<extracted>",
+          "name": "<slug_of_first_line>",   // required because CONTENT_IMAGE_SUPPORTED=false
+          "folder": "./diagrams"            // or another writable path
+          "theme": "forest",
+          "outputFormat": "png"
+        }
+  3. After the fence, insert:
+        ![diagram](mdc:diagrams/<name>.png)
+  4. If multiple blocks exist, repeat for each.
+  5. If the block is malformed, reply UNCERTAIN and suggest a fix instead of guessing.
+
+
+
+
+
