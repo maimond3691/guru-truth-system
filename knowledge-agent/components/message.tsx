@@ -9,6 +9,10 @@ import { Markdown } from './markdown';
 import { MessageActions } from './message-actions';
 import { PreviewAttachment } from './preview-attachment';
 import { Weather } from './weather';
+import { GitHubRepoList } from './github/GitHubRepoList';
+import { GitHubFileTree } from './github/GitHubFileTree';
+import { GitHubFileContent } from './github/GitHubFileContent';
+import { GitHubCommitHistory } from './github/GitHubCommitHistory';
 import equal from 'fast-deep-equal';
 import { cn, sanitizeText } from '@/lib/utils';
 import { Button } from './ui/button';
@@ -303,6 +307,107 @@ const PurePreviewMessage = ({
                         result={output}
                         isReadonly={isReadonly}
                       />
+                    </div>
+                  );
+                }
+              }
+
+              // GitHub tool handlers
+              if (type === 'tool-listRepos') {
+                const { toolCallId, state } = part;
+
+                if (state === 'output-available') {
+                  const { output } = part;
+
+                  if ('error' in output) {
+                    return (
+                      <div
+                        key={toolCallId}
+                        className="text-red-500 p-2 border rounded"
+                      >
+                        Error: {String(output.error)}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={toolCallId}>
+                      <GitHubRepoList repos={output} />
+                    </div>
+                  );
+                }
+              }
+
+              if (type === 'tool-listFiles') {
+                const { toolCallId, state } = part;
+
+                if (state === 'output-available') {
+                  const { output } = part;
+
+                  if ('error' in output) {
+                    return (
+                      <div
+                        key={toolCallId}
+                        className="text-red-500 p-2 border rounded"
+                      >
+                        Error: {String(output.error)}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={toolCallId}>
+                      <GitHubFileTree data={output as any} />
+                    </div>
+                  );
+                }
+              }
+
+              if (type === 'tool-readFile') {
+                const { toolCallId, state } = part;
+
+                if (state === 'output-available') {
+                  const { output } = part;
+
+                  if ('error' in output) {
+                    return (
+                      <div
+                        key={toolCallId}
+                        className="text-red-500 p-2 border rounded"
+                      >
+                        Error: {String(output.error)}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={toolCallId}>
+                      <GitHubFileContent file={output} />
+                    </div>
+                  );
+                }
+              }
+
+              if (type.includes('tool-getCommitHistory')) {
+                const { toolCallId, state } = part as any;
+
+                if (state === 'output-available') {
+                  const { output } = part as any;
+
+                  if ('error' in output) {
+                    return (
+                      <div
+                        key={toolCallId}
+                        className="text-red-500 p-2 border rounded"
+                      >
+                        Error: {String(output.error)}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={toolCallId}>
+                      <GitHubCommitHistory data={output} />
                     </div>
                   );
                 }
