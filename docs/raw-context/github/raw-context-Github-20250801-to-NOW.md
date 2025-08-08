@@ -20,7 +20,7 @@
   },
   "artifacts": [
     {
-      "id": "57da6b1c-769e-4430-be19-c23e45f99716",
+      "id": "dd7512a0-0553-4b5f-a43a-02a09133b606",
       "kind": "text",
       "title": "Raw Context — Github — 2025-08-01..NOW",
       "github": {
@@ -30,13 +30,13 @@
       }
     }
   ],
-  "lastUpdatedAt": "2025-08-08T20:22:11.878Z"
+  "lastUpdatedAt": "2025-08-08T20:23:22.164Z"
 }
 ---
 
 # Raw Context – Consolidated Changes
 
-Generated: 2025-08-08T20:22:11.844Z
+Generated: 2025-08-08T20:23:22.164Z
 Change Period: since 2025-08-01
 Selected Sources:
 - Github (organization): peak-watch; repos: [stylegan2-pytorch, dashboard]; branches: [main]; since: 2025-08-01
@@ -45,10 +45,10 @@ Selected Sources:
 
 ## Executive Summary
 - Total Changes Analyzed: 1
-- Primary Themes: dashboard, monitoring, main-source
-- Affected Workflows: Based on the path structure showing a dashboard main component and source directory, here are 5 likely affected workflows:
+- Primary Themes: dashboard, monitoring, main-branch, source-code, peak-watch
+- Affected Workflows: Based on the labels "peak-watch/dashboard (main), src", this appears to be related to a dashboard application's main source code. Here are 5 likely affected workflows:
 
-Dashboard rendering, Data visualization, UI components, Frontend build, Monitoring display
+Dashboard Rendering, Data Visualization, User Interface Updates, Source Code Build, Main Branch Deployment
 
 ---
 
