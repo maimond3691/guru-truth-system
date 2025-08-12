@@ -1,0 +1,849 @@
+import { PreviewMessage, ThinkingMessage } from './message';
+import { Greeting } from './greeting';
+import { memo, useEffect, useState } from 'react';
+import equal from 'fast-deep-equal';
+import type { UseChatHelpers } from '@ai-sdk/react';
+import { motion } from 'framer-motion';
+import { useMessages } from '@/hooks/use-messages';
+import type { ChatMessage } from '@/lib/types';
+import { useDataStream } from './data-stream-provider';
+import { generateUUID } from '@/lib/utils';
+import { CrossSmallIcon } from '@/components/icons';
+
+function Phase1SequentialSetup({
+  selectedSources,
+  appendAssistantMessage,
+  onBeforeGenerate,
+}: {
+  selectedSources: Array<'github' | 'docs' | 'sheets' | 'guru'>;
+  appendAssistantMessage: (text: string) => void;
+  onBeforeGenerate?: () => void;
+}) {
+  // Index of current source to configure
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Common
+  const [title, setTitle] = useState<string>('Raw Context — {SOURCES} — {SINCE..NOW}');
+  const [submitting, setSubmitting] = useState(false);
+
+  // GitHub state
+  const [repos, setRepos] = useState<string[]>([]);
+  const [useAllRepos, setUseAllRepos] = useState<boolean>(true);
+  const [availableRepos, setAvailableRepos] = useState<Array<{ name: string; fullName: string }>>([]);
+  const [selectedRepo, setSelectedRepo] = useState<string>('');
+  const [branches, setBranches] = useState<string[]>(['main']);
+  const [availableBranches, setAvailableBranches] = useState<Array<{ name: string }>>([]);
+  const [sinceDate, setSinceDate] = useState<string>('');
+  const [maxFileLines, setMaxFileLines] = useState<number>(2000);
+  const [maxFileBytes, setMaxFileBytes] = useState<number>(200 * 1024);
+  const [largeFileStrategy, setLargeFileStrategy] = useState<'summary' | 'headTail' | 'exclude'>('summary');
+  const [headTailHeadLines, setHeadTailHeadLines] = useState<number>(200);
+  const [headTailTailLines, setHeadTailTailLines] = useState<number>(50);
+  const [summarizeLockfiles, setSummarizeLockfiles] = useState<boolean>(true);
+
+  // Google state
+  const [googleConnected, setGoogleConnected] = useState<boolean>(false);
+  const [googleIsLoading, setGoogleIsLoading] = useState<boolean>(true);
+  const [googleSelected, setGoogleSelected] = useState<Array<{ id: string; name: string; mimeType: string }>>([]);
+
+  // Guru state
+  const [guruQuery, setGuruQuery] = useState<string>('');
+  const [guruSearching, setGuruSearching] = useState<boolean>(false);
+  const [guruResults, setGuruResults] = useState<Array<{ id: string; title: string }>>([]);
+  const [guruSelected, setGuruSelected] = useState<Array<{ id: string; title: string }>>([]);
+
+  // Persisted configs (per source)
+  const [githubConfig, setGithubConfig] = useState<null | {
+    org: string;
+    repos: string[];
+    branches: string[];
+    sinceDate: string;
+    maxFileLines?: number;
+    maxFileBytes?: number;
+    largeFileStrategy?: 'summary' | 'headTail' | 'exclude';
+    summarizeLockfiles?: boolean;
+    headTailHeadLines?: number;
+    headTailTailLines?: number;
+  }>(null);
+  const [googleConfig, setGoogleConfig] = useState<null | { files: Array<{ id: string; name: string; mimeType: string }> }>(null);
+  const [guruConfig, setGuruConfig] = useState<null | { cards: Array<{ id: string; title?: string }> }>(null);
+
+  const currentSource = selectedSources[currentIndex];
+  const isLast = currentIndex === selectedSources.length - 1;
+
+  // Load GitHub repos when needed
+  useEffect(() => {
+    if (currentSource !== 'github') return;
+    (async () => {
+      try {
+        const resp = await fetch('/api/github/repos');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setAvailableRepos(data.repos.map((r: any) => ({ name: r.name, fullName: r.fullName })));
+      } catch {}
+    })();
+  }, [currentSource]);
+
+  // Load branches when a repo is picked
+  useEffect(() => {
+    if (currentSource !== 'github') return;
+    (async () => {
+      if (!selectedRepo) {
+        setAvailableBranches([]);
+        return;
+      }
+      try {
+        const resp = await fetch(`/api/github/branches?repo=${encodeURIComponent(selectedRepo)}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setAvailableBranches(data.branches.map((b: any) => ({ name: b.name })));
+      } catch {}
+    })();
+  }, [currentSource, selectedRepo]);
+
+  // Load Google connection status when needed
+  useEffect(() => {
+    if (!(currentSource === 'docs' || currentSource === 'sheets')) return;
+    (async () => {
+      setGoogleIsLoading(true);
+      try {
+        // Only query status if redirect URI is configured; otherwise treat as disconnected
+        if (!process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI) {
+          setGoogleConnected(false);
+        } else {
+          const resp = await fetch('/api/google/oauth?action=status');
+          const data = await resp.json();
+          setGoogleConnected(!!data.connected);
+        }
+      } catch {}
+      setGoogleIsLoading(false);
+    })();
+  }, [currentSource]);
+
+  function toggleRepo(name: string) {
+    setRepos((prev) => (prev.includes(name) ? prev.filter((r) => r !== name) : [...prev, name]));
+  }
+
+  function toggleBranch(name: string) {
+    setBranches((prev) => (prev.includes(name) ? prev.filter((r) => r !== name) : [...prev, name]));
+  }
+
+  const openGooglePicker = async () => {
+    try {
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+      const redirectUri = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI;
+      if (!apiKey || !redirectUri) {
+        alert('Google Picker requires NEXT_PUBLIC_GOOGLE_API_KEY and NEXT_PUBLIC_GOOGLE_REDIRECT_URI');
+        return;
+      }
+
+      // Fetch an access token for the current user
+      const tokenResp = await fetch('/api/google/access-token');
+      if (!tokenResp.ok) throw new Error('Unable to get Google access token');
+      const { accessToken } = await tokenResp.json();
+
+      // Load Google APIs if not already present
+      await new Promise<void>((resolve, reject) => {
+        if ((window as any).gapi?.load && (window as any).google?.picker) return resolve();
+        const script = document.createElement('script');
+        script.src = 'https://apis.google.com/js/api.js';
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error('Failed to load Google API'));
+        document.head.appendChild(script);
+      });
+
+      // Load the picker module via gapi
+      await new Promise<void>((resolve, reject) => {
+        const gapi = (window as any).gapi;
+        if (!gapi?.load) return reject(new Error('Google API client not available'));
+        gapi.load('picker', { callback: resolve });
+      });
+
+      const googleNS = (window as any).google;
+      if (!googleNS?.picker) throw new Error('Google Picker not available');
+
+      const viewDocs = new googleNS.picker.DocsView()
+        .setIncludeFolders(true)
+        .setSelectFolderEnabled(true)
+        .setMimeTypes('application/vnd.google-apps.document,application/vnd.google-apps.spreadsheet');
+
+      const picker = new googleNS.picker.PickerBuilder()
+        .enableFeature(googleNS.picker.Feature.NAV_HIDDEN)
+        .enableFeature(googleNS.picker.Feature.MULTISELECT_ENABLED)
+        .setOAuthToken(accessToken)
+        .setDeveloperKey(apiKey)
+        .addView(viewDocs)
+        .setCallback((data: any) => {
+          if (data.action === googleNS.picker.Action.PICKED) {
+            const picked = (data.docs || []).map((d: any) => ({
+              id: d.id,
+              name: d.name,
+              mimeType: d.mimeType,
+            }));
+            setGoogleSelected(picked);
+          }
+        })
+        .build();
+      picker.setVisible(true);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to open Google Picker');
+    }
+  };
+
+  const connectGoogle = async () => {
+    const resp = await fetch('/api/google/oauth?action=start');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    window.location.href = data.authUrl;
+  };
+
+  const searchGuru = async () => {
+    setGuruSearching(true);
+    try {
+      const params = new URLSearchParams();
+      if (guruQuery) params.set('q', guruQuery);
+      params.set('max', '20');
+      const resp = await fetch(`/api/guru/search?${params.toString()}`);
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      setGuruResults((data.cards || data.results || data.results?.cards || data.cards || []).map((c: any) => ({ id: c.id, title: c.title })));
+    } catch (e: any) {
+      alert(e?.message || 'Guru search failed');
+    } finally {
+      setGuruSearching(false);
+    }
+  };
+
+  const handleSaveAndNext = async () => {
+    // Validate and persist current source config locally
+    if (currentSource === 'github') {
+      if (!sinceDate) {
+        alert('Please enter a since date (YYYY-MM-DD)');
+        return;
+      }
+      setGithubConfig({ org: 'peak-watch', repos: useAllRepos ? ['*'] : repos, branches: branches.length ? branches : ['main'], sinceDate, maxFileLines, maxFileBytes, largeFileStrategy, summarizeLockfiles, headTailHeadLines, headTailTailLines });
+    } else if (currentSource === 'docs' || currentSource === 'sheets') {
+      if (!googleConnected) {
+        alert('Please connect Google before proceeding');
+        return;
+      }
+      if (googleSelected.length === 0) {
+        alert('Please select at least one Google file');
+        return;
+      }
+      setGoogleConfig({ files: googleSelected });
+    } else if (currentSource === 'guru') {
+      if (guruSelected.length === 0) {
+        alert('Please select at least one Guru card');
+        return;
+      }
+      setGuruConfig({ cards: guruSelected });
+    }
+
+    if (!isLast) {
+      setCurrentIndex((i) => i + 1);
+      return;
+    }
+
+    // Last source configured → run ingestion
+    onBeforeGenerate?.();
+    setSubmitting(true);
+    try {
+      const documentId = generateUUID();
+      const chosenSources: any[] = [];
+      const sourcesLabel: string[] = [];
+
+      if (githubConfig || currentSource === 'github') {
+        // Use latest entered GitHub config
+        const conf = githubConfig ?? { org: 'peak-watch', repos: useAllRepos ? ['*'] : repos, branches: branches.length ? branches : ['main'], sinceDate };
+        chosenSources.push({ type: 'github', ...conf });
+        sourcesLabel.push('Github');
+      }
+
+      if (googleConfig || currentSource === 'docs' || currentSource === 'sheets') {
+        const conf = googleConfig ?? { files: googleSelected };
+        chosenSources.push({ type: 'google', ...conf });
+        sourcesLabel.push('Google');
+      }
+
+      if (guruConfig || currentSource === 'guru') {
+        const conf = guruConfig ?? { cards: guruSelected };
+        chosenSources.push({ type: 'guru', ...conf });
+        sourcesLabel.push('Guru');
+      }
+
+      const computedTitle = title
+        .replace('{SOURCES}', sourcesLabel.filter((v, i, a) => a.indexOf(v) === i).join(' + '))
+        .replace('{SINCE..NOW}', sinceDate ? `${sinceDate}..${new Date().toISOString().split('T')[0]}` : '');
+
+      const payload = {
+        documentId,
+        title: computedTitle,
+        params: { sources: chosenSources },
+      };
+
+      const resp = await fetch('/api/phase1', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const { download, summary } = await resp.json();
+      const url = `/api/phase1/download?id=${encodeURIComponent(download.documentId)}&fileName=${encodeURIComponent(download.fileName)}`;
+      appendAssistantMessage(`Summary: ${summary}\n\n[Download ${download.fileName}](${url})`);
+    } catch (e: any) {
+      alert(e?.message || 'Failed to start Phase 1');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const label = selectedSources
+    .map((s) => (s === 'github' ? 'GitHub' : s === 'guru' ? 'Guru' : 'Google'))
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .join(' + ');
+
+  return (
+    <div className="border rounded-xl p-4 bg-zinc-50 dark:bg-zinc-900/40">
+      <div className="font-semibold mb-2">Phase 1 — Setup ({label})</div>
+
+      <div className="flex flex-col gap-3">
+        <input
+          className="px-3 py-2 rounded-md bg-background border"
+          placeholder="Document title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+
+        {currentSource === 'github' && (
+          <div className="flex flex-col gap-3">
+            <div className="text-sm font-medium">GitHub</div>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={useAllRepos} onChange={(e) => setUseAllRepos(e.target.checked)} />
+              <span>All repos in org <code>peak-watch</code></span>
+            </label>
+            {!useAllRepos && (
+              <div className="flex flex-col gap-2">
+                <div className="text-sm text-zinc-500">Select repositories:</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-auto">
+                  {availableRepos.map((repo) => (
+                    <label key={repo.name} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={repos.includes(repo.name)}
+                        onChange={() => toggleRepo(repo.name)}
+                      />
+                      <span className="truncate">{repo.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2">
+              <div className="text-sm text-zinc-500">Select a repo to view branches (optional):</div>
+              <select
+                className="px-3 py-2 rounded-md bg-background border"
+                value={selectedRepo}
+                onChange={(e) => setSelectedRepo(e.target.value)}
+              >
+                <option value="">(optional) Select repo for branch picker</option>
+                {availableRepos.map((repo) => (
+                  <option key={repo.name} value={repo.name}>
+                    {repo.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedRepo && (
+              <div className="flex flex-col gap-2">
+                <div className="text-sm text-zinc-500">Select branches:</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-auto">
+                  {availableBranches.map((b) => (
+                    <label key={b.name} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={branches.includes(b.name)}
+                        onChange={() => toggleBranch(b.name)}
+                      />
+                      <span>{b.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <input
+              className="px-3 py-2 rounded-md bg-background border"
+              placeholder="Since date (YYYY-MM-DD)"
+              value={sinceDate}
+              onChange={(e) => setSinceDate(e.target.value)}
+            />
+
+            <div className="flex flex-col gap-2 p-3 border rounded-md">
+              <div className="text-sm font-medium">Large file handling</div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <label className="flex items-center gap-2">
+                  <span className="text-sm text-zinc-500">Max lines</span>
+                  <input type="number" className="px-2 py-1 rounded-md bg-background border w-28" value={maxFileLines} onChange={(e) => setMaxFileLines(Number(e.target.value) || 0)} />
+                </label>
+                <label className="flex items-center gap-2">
+                  <span className="text-sm text-zinc-500">Max bytes</span>
+                  <input type="number" className="px-2 py-1 rounded-md bg-background border w-28" value={maxFileBytes} onChange={(e) => setMaxFileBytes(Number(e.target.value) || 0)} />
+                </label>
+                <label className="flex items-center gap-2">
+                  <span className="text-sm text-zinc-500">Strategy</span>
+                  <select className="px-2 py-1 rounded-md bg-background border" value={largeFileStrategy} onChange={(e) => setLargeFileStrategy(e.target.value as any)}>
+                    <option value="summary">Summarize</option>
+                    <option value="headTail">Head/Tail</option>
+                    <option value="exclude">Exclude</option>
+                  </select>
+                </label>
+              </div>
+              {largeFileStrategy === 'headTail' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <label className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-500">Head lines</span>
+                    <input type="number" className="px-2 py-1 rounded-md bg-background border w-28" value={headTailHeadLines} onChange={(e) => setHeadTailHeadLines(Number(e.target.value) || 0)} />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-500">Tail lines</span>
+                    <input type="number" className="px-2 py-1 rounded-md bg-background border w-28" value={headTailTailLines} onChange={(e) => setHeadTailTailLines(Number(e.target.value) || 0)} />
+                  </label>
+                </div>
+              )}
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={summarizeLockfiles} onChange={(e) => setSummarizeLockfiles(e.target.checked)} />
+                <span>Summarize lockfiles/package.json rather than include full content</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {(currentSource === 'docs' || currentSource === 'sheets') && (
+          <div className="flex flex-col gap-3">
+            <div className="text-sm font-medium">Google</div>
+            {googleIsLoading ? (
+              <div>Loading Google status…</div>
+            ) : !googleConnected ? (
+              <div className="flex flex-col gap-2">
+                <div className="text-sm text-zinc-500">Connect your Google account to continue.</div>
+                <button
+                  className="px-3 py-2 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                  onClick={connectGoogle}
+                  type="button"
+                >
+                  Connect Google
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-2 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                  onClick={openGooglePicker}
+                  type="button"
+                >
+                  Select files
+                </button>
+                <span className="text-sm text-zinc-500">Selected: {googleSelected.length}</span>
+              </div>
+            )}
+            {googleSelected.length > 0 && (
+              <ul className="text-sm list-disc ml-5">
+                {googleSelected.map((f) => (
+                  <li key={f.id} className="flex items-center justify-between gap-2">
+                    <span>
+                      {f.name} <span className="text-zinc-500">({f.id})</span>
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${f.name}`}
+                      className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+                      onClick={() =>
+                        setGoogleSelected((prev) => prev.filter((x) => x.id !== f.id))
+                      }
+                    >
+                      <CrossSmallIcon size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {currentSource === 'guru' && (
+          <div className="flex flex-col gap-3">
+            <div className="text-sm font-medium">Guru</div>
+            <div className="flex items-center gap-2">
+              <input
+                className="px-3 py-2 rounded-md bg-background border flex-1"
+                placeholder="Search cards (title/content)…"
+                value={guruQuery}
+                onChange={(e) => setGuruQuery(e.target.value)}
+              />
+              <button
+                className="px-3 py-2 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                onClick={searchGuru}
+                type="button"
+                disabled={guruSearching}
+              >
+                {guruSearching ? 'Searching…' : 'Search'}
+              </button>
+            </div>
+            {guruResults.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="text-sm text-zinc-500">Results:</div>
+                <ul className="max-h-48 overflow-auto divide-y rounded border">
+                  {guruResults.map((c) => (
+                    <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <span className="truncate">{c.title}</span>
+                      <button
+                        type="button"
+                        className="px-2 py-1 text-sm rounded bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                        onClick={() =>
+                          setGuruSelected((prev) => (prev.find((x) => x.id === c.id) ? prev : [...prev, c]))
+                        }
+                      >
+                        Add
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {guruSelected.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="text-sm text-zinc-500">Selected cards:</div>
+                <ul className="text-sm list-disc ml-5">
+                  {guruSelected.map((c) => (
+                    <li key={c.id} className="flex items-center justify-between gap-2">
+                      <span>
+                        {c.title} <span className="text-zinc-500">({c.id})</span>
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${c.title}`}
+                        className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+                        onClick={() => setGuruSelected((prev) => prev.filter((x) => x.id !== c.id))}
+                      >
+                        <CrossSmallIcon size={12} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            className="px-3 py-2 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+            onClick={handleSaveAndNext}
+            disabled={submitting}
+            type="button"
+          >
+            {isLast ? (submitting ? 'Submitting…' : 'Generate Raw Context') : 'Save & Next'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface MessagesProps {
+  chatId: string;
+  status: UseChatHelpers<ChatMessage>['status'];
+  messages: ChatMessage[];
+  setMessages: UseChatHelpers<ChatMessage>['setMessages'];
+  regenerate: UseChatHelpers<ChatMessage>['regenerate'];
+  isReadonly: boolean;
+  isArtifactVisible: boolean;
+}
+
+function PureMessages({
+  chatId,
+  status,
+  messages,
+  setMessages,
+  regenerate,
+  isReadonly,
+}: MessagesProps) {
+  const {
+    containerRef: messagesContainerRef,
+    endRef: messagesEndRef,
+    onViewportEnter,
+    onViewportLeave,
+    hasSentMessage,
+  } = useMessages({
+    chatId,
+    status,
+  });
+
+  useDataStream();
+
+  const [selectedPhase, setSelectedPhase] = useState<'phase-1' | 'phase-2' | 'phase-3' | null>(null);
+  const [selectedSources, setSelectedSources] = useState<Array<'github' | 'docs' | 'sheets' | 'guru'>>([]);
+  const [showPhase1Setup, setShowPhase1Setup] = useState<boolean>(false);
+  const [suppressNextAssistant, setSuppressNextAssistant] = useState<boolean>(false);
+  const [injectedAssistantId, setInjectedAssistantId] = useState<string | null>(null);
+
+  // Helper function to save messages to database
+  const saveMessagesToDatabase = async (messagesToSave: ChatMessage[]) => {
+    try {
+      await fetch('/api/workflow', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: chatId,
+          messages: messagesToSave,
+        }),
+      });
+    } catch (error) {
+      console.warn('Failed to save messages to database:', error);
+    }
+  };
+
+  // When Phase 1 is active and the user responds with data sources, show sequential setup
+  useEffect(() => {
+    if (selectedPhase !== 'phase-1') return;
+    if (selectedSources.length > 0) return;
+    if (!messages || messages.length === 0) return;
+
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    const userText =
+      lastUser?.parts
+        ?.filter((p) => p.type === 'text')
+        .map((p: any) => p.text)
+        .join(' ')
+        .toLowerCase() || '';
+    if (!userText) return;
+
+    const sources: Array<'github' | 'docs' | 'sheets' | 'guru'> = [];
+    if (userText.includes('github')) sources.push('github');
+    if (userText.includes('google docs') || userText.includes('docs')) sources.push('docs');
+    if (userText.includes('google sheets') || userText.includes('sheets')) sources.push('sheets');
+    if (userText.includes('guru')) sources.push('guru');
+
+    if (sources.length > 0) {
+      setSelectedSources(sources);
+      setShowPhase1Setup(true);
+      const newId = generateUUID();
+      setInjectedAssistantId(newId);
+      setSuppressNextAssistant(true);
+      const label = sources
+        .map((s) => (s === 'github' ? 'GitHub' : s === 'guru' ? 'Guru' : 'Google'))
+        .filter((v, i, a) => a.indexOf(v) === i)
+        .join(' + ');
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: newId,
+          role: 'assistant',
+          parts: [
+            { type: 'text', text: `I will help collect raw context from ${label}. We'll proceed one source at a time. Fill in the setup below to continue.` },
+          ],
+          metadata: { createdAt: new Date().toISOString() },
+        } as ChatMessage,
+      ]);
+      
+      // Save the new assistant message to database
+      setTimeout(() => {
+        const newMessage = {
+          id: newId,
+          role: 'assistant' as const,
+          parts: [
+            { type: 'text', text: `I will help collect raw context from ${label}. We'll proceed one source at a time. Fill in the setup below to continue.` },
+          ],
+          metadata: { createdAt: new Date().toISOString() },
+        } as ChatMessage;
+        const currentMessages = [...messages, newMessage];
+        saveMessagesToDatabase(currentMessages);
+      }, 100);
+    }
+  }, [messages, selectedPhase, selectedSources, setMessages]);
+
+  // Suppress the next assistant response (typically the model reply) after we inject our own
+  useEffect(() => {
+    if (!suppressNextAssistant) return;
+    const last = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (!last) return;
+    if (last.id === injectedAssistantId) return; // our injected message; wait for the next one
+    setMessages((prev) => prev.filter((m) => m.id !== last.id));
+    setSuppressNextAssistant(false);
+  }, [messages, suppressNextAssistant, injectedAssistantId, setMessages]);
+
+  return (
+    <div
+      ref={messagesContainerRef}
+      className="flex flex-col min-w-0 gap-6 flex-1 overflow-y-scroll pt-4 relative"
+    >
+      {messages.length === 0 && (
+        <Greeting
+          onSelectPhase={(p) => {
+            setSelectedPhase(p);
+            if (p === 'phase-1') {
+              const newMessage = {
+                id: generateUUID(),
+                role: 'assistant' as const,
+                parts: [
+                  {
+                    type: 'text',
+                    text:
+                      'For Phase 1, which data sources should I read from? You can choose multiple.\n\n- GitHub\n- Google Docs\n- Google Sheets\n- Guru',
+                  },
+                ],
+                metadata: { createdAt: new Date().toISOString() },
+              } as ChatMessage;
+              
+              setMessages((prev) => [...prev, newMessage]);
+              
+              // Save the new message to database
+              setTimeout(() => {
+                const currentMessages = [...messages, newMessage];
+                saveMessagesToDatabase(currentMessages);
+              }, 100);
+            } else {
+              const text =
+                p === 'phase-2'
+                  ? 'You selected phase 2. Please upload the raw context markdown (.md) file you generated in Phase 1 so I can draft Guru cards from it.'
+                  : `You selected ${p.replace('-', ' ')}. Describe what you want to do to begin.`;
+
+              const newMessage = {
+                id: generateUUID(),
+                role: 'assistant' as const,
+                parts: [
+                  {
+                    type: 'text',
+                    text,
+                  },
+                ],
+                metadata: { createdAt: new Date().toISOString() },
+              } as ChatMessage;
+              
+              setMessages((prev) => [...prev, newMessage]);
+              
+              // Save the new message to database  
+              setTimeout(() => {
+                const currentMessages = [...messages, newMessage];
+                saveMessagesToDatabase(currentMessages);
+              }, 100);
+            }
+          }}
+        />
+      )}
+
+      {(() => {
+        // If we are showing the Phase 1 setup, insert it right after the injected guidance message
+        if (selectedPhase === 'phase-1' && showPhase1Setup && injectedAssistantId) {
+          const idx = messages.findIndex((m) => m.id === injectedAssistantId);
+          if (idx >= 0) {
+            const before = messages.slice(0, idx + 1);
+            const after = messages.slice(idx + 1);
+            return (
+              <>
+                {before.map((message, index) => (
+                  <PreviewMessage
+                    key={message.id}
+                    chatId={chatId}
+                    message={message}
+                    isLoading={status === 'streaming' && messages.length - 1 === index}
+                    setMessages={setMessages}
+                    regenerate={regenerate}
+                    isReadonly={isReadonly}
+                    requiresScrollPadding={hasSentMessage && index === messages.length - 1}
+                  />
+                ))}
+                <div className="w-full mx-auto max-w-3xl px-4 -mt-6">
+                  <Phase1SequentialSetup
+                    selectedSources={selectedSources}
+                    appendAssistantMessage={(text) =>
+                      setMessages((prev) => [
+                        ...prev,
+                        {
+                          id: generateUUID(),
+                          role: 'assistant',
+                          parts: [{ type: 'text', text }],
+                          metadata: { createdAt: new Date().toISOString() },
+                        } as ChatMessage,
+                      ])
+                    }
+                    onBeforeGenerate={() => setSuppressNextAssistant(false)}
+                  />
+                </div>
+                {after.map((message, index) => (
+                  <PreviewMessage
+                    key={message.id}
+                    chatId={chatId}
+                    message={message}
+                    isLoading={status === 'streaming' && messages.length - 1 === index}
+                    setMessages={setMessages}
+                    regenerate={regenerate}
+                    isReadonly={isReadonly}
+                    requiresScrollPadding={hasSentMessage && index === messages.length - 1}
+                  />
+                ))}
+              </>
+            );
+          }
+        }
+        // Default: render all messages normally when setup is not inserted inline
+        return messages.map((message, index) => (
+          <PreviewMessage
+            key={message.id}
+            chatId={chatId}
+            message={message}
+            isLoading={status === 'streaming' && messages.length - 1 === index}
+            setMessages={setMessages}
+            regenerate={regenerate}
+            isReadonly={isReadonly}
+            requiresScrollPadding={hasSentMessage && index === messages.length - 1}
+          />
+        ));
+      })()}
+
+      {/* When setup is shown but guidance message not found (edge case), render setup at the end under guidance */}
+      {selectedPhase === 'phase-1' && showPhase1Setup && !injectedAssistantId && (
+        <div className="w-full mx-auto max-w-3xl px-4 -mt-6">
+          <Phase1SequentialSetup
+            selectedSources={selectedSources}
+            appendAssistantMessage={(text) =>
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: generateUUID(),
+                  role: 'assistant',
+                  parts: [{ type: 'text', text }],
+                  metadata: { createdAt: new Date().toISOString() },
+                } as ChatMessage,
+              ])
+            }
+            onBeforeGenerate={() => setSuppressNextAssistant(false)}
+          />
+        </div>
+      )}
+
+      {status === 'submitted' && messages.length > 0 && messages[messages.length - 1].role === 'user' && <ThinkingMessage />}
+
+      <motion.div
+        ref={messagesEndRef}
+        className="shrink-0 min-w-[24px] min-h-[24px]"
+        onViewportLeave={onViewportLeave}
+        onViewportEnter={onViewportEnter}
+      />
+    </div>
+  );
+}
+
+export const Messages = memo(PureMessages, (prevProps, nextProps) => {
+  if (prevProps.isArtifactVisible && nextProps.isArtifactVisible) return true;
+
+  if (prevProps.status !== nextProps.status) return false;
+  if (prevProps.status && nextProps.status) return false;
+  if (prevProps.messages.length !== nextProps.messages.length) return false;
+  if (!equal(prevProps.messages, nextProps.messages)) return false;
+  return true;
+});
