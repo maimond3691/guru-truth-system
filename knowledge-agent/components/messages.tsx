@@ -33,7 +33,29 @@ function Phase1SequentialSetup({
   const [selectedRepo, setSelectedRepo] = useState<string>('');
   const [branches, setBranches] = useState<string[]>(['main']);
   const [availableBranches, setAvailableBranches] = useState<Array<{ name: string }>>([]);
+  
+  // GitHub context options
+  const [enableDateRange, setEnableDateRange] = useState<boolean>(true);
+  const [enableFileSelection, setEnableFileSelection] = useState<boolean>(false);
+  const [enableCommitSelection, setEnableCommitSelection] = useState<boolean>(false);
+  
+  // Date range options
   const [sinceDate, setSinceDate] = useState<string>('');
+  
+  // File selection options
+  const [availableFiles, setAvailableFiles] = useState<Array<{ path: string; type: 'file' | 'dir' }>>([]);
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [filePickerRepo, setFilePickerRepo] = useState<string>('');
+  const [filePickerBranch, setFilePickerBranch] = useState<string>('main');
+  const [currentPath, setCurrentPath] = useState<string>('');
+  
+  // Commit selection options
+  const [availableCommits, setAvailableCommits] = useState<Array<{ sha: string; message: string; author: { name: string; date: string } }>>([]);
+  const [selectedCommits, setSelectedCommits] = useState<string[]>([]);
+  const [commitPickerRepo, setCommitPickerRepo] = useState<string>('');
+  const [commitPickerBranch, setCommitPickerBranch] = useState<string>('main');
+  
+  // File handling options
   const [maxFileLines, setMaxFileLines] = useState<number>(2000);
   const [maxFileBytes, setMaxFileBytes] = useState<number>(200 * 1024);
   const [largeFileStrategy, setLargeFileStrategy] = useState<'summary' | 'headTail' | 'exclude'>('summary');
@@ -57,7 +79,16 @@ function Phase1SequentialSetup({
     org: string;
     repos: string[];
     branches: string[];
-    sinceDate: string;
+    contextOptions: Array<{
+      mode: 'date-range';
+      sinceDate: string;
+    } | {
+      mode: 'file-selection';
+      selectedPaths: string[];
+    } | {
+      mode: 'commit-selection';
+      selectedCommits: string[];
+    }>;
     maxFileLines?: number;
     maxFileBytes?: number;
     largeFileStrategy?: 'summary' | 'headTail' | 'exclude';
@@ -120,12 +151,50 @@ function Phase1SequentialSetup({
     })();
   }, [currentSource]);
 
+  // Load files when file picker repo/branch changes
+  useEffect(() => {
+    if (currentSource !== 'github' || !enableFileSelection || !filePickerRepo) return;
+    (async () => {
+      try {
+        const resp = await fetch(`/api/github/files?repo=${encodeURIComponent(filePickerRepo)}&branch=${encodeURIComponent(filePickerBranch)}&path=${encodeURIComponent(currentPath)}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setAvailableFiles(data.files || []);
+      } catch {}
+    })();
+  }, [currentSource, enableFileSelection, filePickerRepo, filePickerBranch, currentPath]);
+
+  // Load commits when commit picker repo/branch changes
+  useEffect(() => {
+    if (currentSource !== 'github' || !enableCommitSelection || !commitPickerRepo) return;
+    (async () => {
+      try {
+        const resp = await fetch(`/api/github/commits?repo=${encodeURIComponent(commitPickerRepo)}&branch=${encodeURIComponent(commitPickerBranch)}&limit=50`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setAvailableCommits(data.commits || []);
+      } catch {}
+    })();
+  }, [currentSource, enableCommitSelection, commitPickerRepo, commitPickerBranch]);
+
   function toggleRepo(name: string) {
     setRepos((prev) => (prev.includes(name) ? prev.filter((r) => r !== name) : [...prev, name]));
   }
 
   function toggleBranch(name: string) {
     setBranches((prev) => (prev.includes(name) ? prev.filter((r) => r !== name) : [...prev, name]));
+  }
+
+  function toggleFile(path: string) {
+    setSelectedFiles((prev) => (prev.includes(path) ? prev.filter((f) => f !== path) : [...prev, path]));
+  }
+
+  function toggleCommit(sha: string) {
+    setSelectedCommits((prev) => (prev.includes(sha) ? prev.filter((c) => c !== sha) : [...prev, sha]));
+  }
+
+  function navigateToPath(path: string) {
+    setCurrentPath(path);
   }
 
   const openGooglePicker = async () => {
@@ -218,11 +287,50 @@ function Phase1SequentialSetup({
   const handleSaveAndNext = async () => {
     // Validate and persist current source config locally
     if (currentSource === 'github') {
-      if (!sinceDate) {
-        alert('Please enter a since date (YYYY-MM-DD)');
+      // Build context options based on enabled modes
+      const contextOptions: Array<any> = [];
+      
+      if (enableDateRange) {
+        if (!sinceDate) {
+          alert('Please enter a since date (YYYY-MM-DD) for date range mode');
+          return;
+        }
+        contextOptions.push({ mode: 'date-range', sinceDate });
+      }
+      
+      if (enableFileSelection) {
+        if (selectedFiles.length === 0) {
+          alert('Please select at least one file or directory for file selection mode');
+          return;
+        }
+        contextOptions.push({ mode: 'file-selection', selectedPaths: selectedFiles });
+      }
+      
+      if (enableCommitSelection) {
+        if (selectedCommits.length === 0) {
+          alert('Please select at least one commit for commit selection mode');
+          return;
+        }
+        contextOptions.push({ mode: 'commit-selection', selectedCommits });
+      }
+      
+      if (contextOptions.length === 0) {
+        alert('Please enable at least one context mode (Date Range, File Selection, or Commit Selection)');
         return;
       }
-      setGithubConfig({ org: 'peak-watch', repos: useAllRepos ? ['*'] : repos, branches: branches.length ? branches : ['main'], sinceDate, maxFileLines, maxFileBytes, largeFileStrategy, summarizeLockfiles, headTailHeadLines, headTailTailLines });
+      
+      setGithubConfig({ 
+        org: 'peak-watch', 
+        repos: useAllRepos ? ['*'] : repos, 
+        branches: branches.length ? branches : ['main'], 
+        contextOptions,
+        maxFileLines, 
+        maxFileBytes, 
+        largeFileStrategy, 
+        summarizeLockfiles, 
+        headTailHeadLines, 
+        headTailTailLines 
+      });
     } else if (currentSource === 'docs' || currentSource === 'sheets') {
       if (!googleConnected) {
         alert('Please connect Google before proceeding');
@@ -256,7 +364,32 @@ function Phase1SequentialSetup({
 
       if (githubConfig || currentSource === 'github') {
         // Use latest entered GitHub config
-        const conf = githubConfig ?? { org: 'peak-watch', repos: useAllRepos ? ['*'] : repos, branches: branches.length ? branches : ['main'], sinceDate };
+        let conf = githubConfig;
+        if (!conf) {
+          // Build fallback config from current state
+          const contextOptions: Array<any> = [];
+          if (enableDateRange && sinceDate) {
+            contextOptions.push({ mode: 'date-range', sinceDate });
+          }
+          if (enableFileSelection && selectedFiles.length > 0) {
+            contextOptions.push({ mode: 'file-selection', selectedPaths: selectedFiles });
+          }
+          if (enableCommitSelection && selectedCommits.length > 0) {
+            contextOptions.push({ mode: 'commit-selection', selectedCommits });
+          }
+          conf = { 
+            org: 'peak-watch', 
+            repos: useAllRepos ? ['*'] : repos, 
+            branches: branches.length ? branches : ['main'], 
+            contextOptions: contextOptions.length > 0 ? contextOptions : [{ mode: 'date-range', sinceDate }],
+            maxFileLines, 
+            maxFileBytes, 
+            largeFileStrategy, 
+            summarizeLockfiles, 
+            headTailHeadLines, 
+            headTailTailLines 
+          };
+        }
         chosenSources.push({ type: 'github', ...conf });
         sourcesLabel.push('Github');
       }
@@ -318,69 +451,196 @@ function Phase1SequentialSetup({
 
         {currentSource === 'github' && (
           <div className="flex flex-col gap-3">
-            <div className="text-sm font-medium">GitHub</div>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={useAllRepos} onChange={(e) => setUseAllRepos(e.target.checked)} />
-              <span>All repos in org <code>peak-watch</code></span>
-            </label>
-            {!useAllRepos && (
+    
+            {/* Context Mode Selection */}
+            <div className="flex flex-col gap-3 p-3 border rounded-md">
+              <div className="text-sm font-medium">GitHub Context Options</div>
+              <div className="text-xs text-zinc-500">Select one or more context modes to combine:</div>
+              
+              {/* Date Range Mode */}
               <div className="flex flex-col gap-2">
-                <div className="text-sm text-zinc-500">Select repositories:</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-auto">
-                  {availableRepos.map((repo) => (
-                    <label key={repo.name} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={repos.includes(repo.name)}
-                        onChange={() => toggleRepo(repo.name)}
-                      />
-                      <span className="truncate">{repo.name}</span>
-                    </label>
-                  ))}
-                </div>
+                <label className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    checked={enableDateRange} 
+                    onChange={(e) => setEnableDateRange(e.target.checked)} 
+                  />
+                  <span className="font-medium">Date Range (all changes since a date)</span>
+                </label>
+                {enableDateRange && (
+                  <input
+                    className="px-3 py-2 rounded-md bg-background border ml-6"
+                    placeholder="Since date (YYYY-MM-DD)"
+                    value={sinceDate}
+                    onChange={(e) => setSinceDate(e.target.value)}
+                  />
+                )}
               </div>
-            )}
 
-            <div className="flex flex-col gap-2">
-              <div className="text-sm text-zinc-500">Select a repo to view branches (optional):</div>
-              <select
-                className="px-3 py-2 rounded-md bg-background border"
-                value={selectedRepo}
-                onChange={(e) => setSelectedRepo(e.target.value)}
-              >
-                <option value="">(optional) Select repo for branch picker</option>
-                {availableRepos.map((repo) => (
-                  <option key={repo.name} value={repo.name}>
-                    {repo.name}
-                  </option>
-                ))}
-              </select>
+              {/* File Selection Mode */}
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    checked={enableFileSelection} 
+                    onChange={(e) => setEnableFileSelection(e.target.checked)} 
+                  />
+                  <span className="font-medium">File Selection (specific files/directories)</span>
+                </label>
+                {enableFileSelection && (
+                  <div className="ml-6 flex flex-col gap-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        className="px-2 py-1 rounded-md bg-background border"
+                        value={filePickerRepo}
+                        onChange={(e) => setFilePickerRepo(e.target.value)}
+                      >
+                        <option value="">Select repo for file picker</option>
+                        {availableRepos.map((repo) => (
+                          <option key={repo.name} value={repo.name}>
+                            {repo.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="px-2 py-1 rounded-md bg-background border"
+                        value={filePickerBranch}
+                        onChange={(e) => setFilePickerBranch(e.target.value)}
+                        disabled={!filePickerRepo}
+                      >
+                        <option value="main">main</option>
+                        {availableBranches.map((b) => (
+                          <option key={b.name} value={b.name}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    {filePickerRepo && (
+                      <div className="flex flex-col gap-2">
+                        {currentPath && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <span>Path: {currentPath}</span>
+                            <button
+                              type="button"
+                              className="text-blue-500 hover:underline text-xs"
+                              onClick={() => setCurrentPath('')}
+                            >
+                              ← Back to root
+                            </button>
+                          </div>
+                        )}
+                        
+                        <div className="max-h-32 overflow-auto border rounded p-2">
+                          {availableFiles.map((file) => (
+                            <div key={file.path} className="flex items-center gap-2 py-1">
+                              {file.type === 'dir' ? (
+                                <button
+                                  type="button"
+                                  className="text-blue-500 hover:underline text-left flex-1"
+                                  onClick={() => navigateToPath(file.path)}
+                                >
+                                  📁 {file.path.split('/').pop()}/
+                                </button>
+                              ) : (
+                                <label className="flex items-center gap-2 flex-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedFiles.includes(file.path)}
+                                    onChange={() => toggleFile(file.path)}
+                                  />
+                                  <span>📄 {file.path.split('/').pop()}</span>
+                                </label>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {selectedFiles.length > 0 && (
+                          <div className="text-sm text-zinc-500">
+                            Selected {selectedFiles.length} file(s): {selectedFiles.slice(0, 3).join(', ')}{selectedFiles.length > 3 ? '...' : ''}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Commit Selection Mode */}
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    checked={enableCommitSelection} 
+                    onChange={(e) => setEnableCommitSelection(e.target.checked)} 
+                  />
+                  <span className="font-medium">Commit Selection (specific commits)</span>
+                </label>
+                {enableCommitSelection && (
+                  <div className="ml-6 flex flex-col gap-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        className="px-2 py-1 rounded-md bg-background border"
+                        value={commitPickerRepo}
+                        onChange={(e) => setCommitPickerRepo(e.target.value)}
+                      >
+                        <option value="">Select repo for commit picker</option>
+                        {availableRepos.map((repo) => (
+                          <option key={repo.name} value={repo.name}>
+                            {repo.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="px-2 py-1 rounded-md bg-background border"
+                        value={commitPickerBranch}
+                        onChange={(e) => setCommitPickerBranch(e.target.value)}
+                        disabled={!commitPickerRepo}
+                      >
+                        <option value="main">main</option>
+                        {availableBranches.map((b) => (
+                          <option key={b.name} value={b.name}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    {commitPickerRepo && (
+                      <div className="flex flex-col gap-2">
+                        <div className="max-h-40 overflow-auto border rounded">
+                          {availableCommits.map((commit) => (
+                            <label key={commit.sha} className="flex items-start gap-2 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                              <input
+                                type="checkbox"
+                                checked={selectedCommits.includes(commit.sha)}
+                                onChange={() => toggleCommit(commit.sha)}
+                                className="mt-1"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-mono text-zinc-500">{commit.sha.substring(0, 7)}</div>
+                                <div className="text-sm truncate">{commit.message}</div>
+                                <div className="text-xs text-zinc-400">
+                                  {commit.author.name} • {new Date(commit.author.date).toLocaleDateString()}
+                                </div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                        
+                        {selectedCommits.length > 0 && (
+                          <div className="text-sm text-zinc-500">
+                            Selected {selectedCommits.length} commit(s)
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-
-            {selectedRepo && (
-              <div className="flex flex-col gap-2">
-                <div className="text-sm text-zinc-500">Select branches:</div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-auto">
-                  {availableBranches.map((b) => (
-                    <label key={b.name} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={branches.includes(b.name)}
-                        onChange={() => toggleBranch(b.name)}
-                      />
-                      <span>{b.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <input
-              className="px-3 py-2 rounded-md bg-background border"
-              placeholder="Since date (YYYY-MM-DD)"
-              value={sinceDate}
-              onChange={(e) => setSinceDate(e.target.value)}
-            />
 
             <div className="flex flex-col gap-2 p-3 border rounded-md">
               <div className="text-sm font-medium">Large file handling</div>

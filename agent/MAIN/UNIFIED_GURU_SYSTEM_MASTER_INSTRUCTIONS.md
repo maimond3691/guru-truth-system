@@ -19,6 +19,21 @@ This system combines organizational planning with engineer-driven iterative deve
 
 ---
 
+## 💬 Conversational UI Entry Flow & Mode Selection
+
+When a new chat starts, the assistant greets and asks the user to select a phase. The exact greeting MUST be:
+
+"Welcome to the Peak Knowledge System. What phase of documentation are you on?
+Phase 1: Read Data Sources and Generate Raw Context File
+Phase 2: Draft Guru Cards and Refine
+Phase 3: Generate Final Guru Cards"
+
+- **Mode Selection:** User picks a phase. The conversation switches to that mode and activates the corresponding agent(s).
+- **Phase Transitions:** After a phase completes and the user approves the output, the assistant explicitly asks whether to proceed to another phase.
+- **Progress Tracking:** Maintain in-session progress state per chat: `{ phase, status: 'in_progress'|'awaiting_approval'|'complete', artifacts: [...] }`.
+
+---
+
 ## 📋 Success Definitions
 
 ### **✅ Guru Card Success Criteria**
@@ -72,7 +87,6 @@ A collection is successful when:
 Guru at Peak is successful when:
 
 - **It's the first place someone checks—and it delivers**
-  - Notion = long-form strategy and planning
   - Slack = ephemeral collaboration  
   - Guru = action-ready operational knowledge
 - **It reduces internal bottlenecks and institutional memory gaps**
@@ -171,204 +185,213 @@ When creating any card, first identify:
 
 *Execute this phase once per quarter or when major system changes occur*
 
-### Step 1.1: Data Source Collection
-Collect ALL relevant data sources with team assistance:
+### Phase 1 Conversational Flow
+1. **Source Selection Prompt:** Ask the user which data sources to pull changes from. Present all supported options (GitHub repos/branches, existing Guru export, Google Docs/Sheets, configuration files, Slack threads, monitoring/runbooks, etc.).
+2. **Time Window Prompt:** Ask whether to fetch only the most recent changes or changes since a specific date. If a date is selected, request the explicit date (YYYY-MM-DD).
+3. **Confirmation:** Summarize the selected sources and time window; ask for confirmation to proceed.
+4. **Execution:** Extract changes from the specified sources; label all evidence by source.
+5. **Output & Review:** Produce a single Raw Context Markdown file (structure below), show it to the user, and ask if they’re happy with it. Offer to re-run with adjusted sources/time window if needed.
+6. **Completion:** Mark Phase 1 as complete only after explicit user approval.
 
-**Code & Documentation Sources:**
-- [ ] All GitHub repositories (main + feature branches)
-- [ ] Existing Guru cards export (use existing `guru_cards_export/` functionality)
-- [ ] README files, wikis, and inline documentation
-- [ ] API documentation and OpenAPI specs
+### Raw Context Markdown – SINGLE TEMPLATE (MANDATORY)
+Use this exact structure and headings when generating the consolidated raw context file:
 
-**Operational Sources:**
-- [ ] Key Google Sheets (process docs, runbooks, contact lists)
-- [ ] Key Google Docs (strategic docs, technical specs)
-- [ ] Engineering Dashboard Archive
-- [ ] Slack pinned messages and important threads
+```markdown
+# Raw Context – Consolidated Changes
 
-**Infrastructure Sources:**
-- [ ] Tech stack snapshots (Vercel, Supabase, Abstract, etc.)
-- [ ] Configuration files (docker-compose, k8s configs, env templates)
-- [ ] Monitoring dashboards and runbooks
-- [ ] Deployment and CI/CD documentation
+Generated: {ISO_TIMESTAMP}
+Change Period: {DESCRIPTION or DATE RANGE}
+Selected Sources:
+- {source_name} ({type}): {scope or path}
+- ...
 
-### Step 1.2: LLM-Driven Gap Analysis
-For each data source, use the existing `analyzer.py` infrastructure to ask:
+---
 
+## Executive Summary
+- Total Changes Analyzed: {N}
+- Primary Themes: {theme1}, {theme2}, {theme3}
+- Affected Workflows: {workflow1}, {workflow2}
+
+---
+
+## Changes by Source
+
+### {SOURCE_NAME} ({TYPE})
+- Change Window: {latest|since YYYY-MM-DD}
+- Summary:
+  - Added: {n} | Modified: {n} | Deleted: {n}
+
+#### Evidence
+- [{EVIDENCE_ID}] {CHANGE_TYPE} — {PATH/IDENTIFIER} @ {TIMESTAMP}
+
+```diff
+{OPTIONAL_DIFF_OR_SNIPPET}
 ```
-Based on this [DATA SOURCE], what Guru cards need to exist for the team?
-Consider:
-- What knowledge gaps would new team members encounter?
-- What questions get asked repeatedly?
-- What processes are undocumented or scattered?
-- What would someone need to know to be effective with this system?
+
+[Repeat for each source]
+
+---
+
+## Changes by Type
+
+### Added
+- [{EVIDENCE_ID}] {SOURCE} — {PATH/IDENTIFIER}
+
+### Modified
+- [{EVIDENCE_ID}] {SOURCE} — {PATH/IDENTIFIER}
+
+### Deleted
+- [{EVIDENCE_ID}] {SOURCE} — {PATH/IDENTIFIER}
+
+---
+
+## Detailed Evidence
+
+### [{EVIDENCE_ID}] {SOURCE} — {CHANGE_TYPE}
+Metadata: {JSON or key/value}
+Timestamp: {ISO}
+
+```text
+{FULL_RELEVANT_CONTENT_OR_TRUNCATED_WITH_NOTE}
 ```
 
-### Step 1.3: Comprehensive Card Inventory
-Build master spreadsheet with columns:
-- **Card Title**
-- **Target Audience** (Role/Persona)
-- **Primary Purpose** (What question does it answer?)
-- **Priority Level** (Critical/Important/Nice-to-have)
-- **Data Sources** (Where knowledge currently lives)
-- **SME Contact** (Who can verify accuracy?)
-- **Estimated Complexity** (Simple/Medium/Complex)
-- **Dependencies** (What other cards must exist first?)
+[Repeat for all evidence]
+```
 
-### Step 1.4: Human Review & Prioritization
-Use judgment and team input for:
-- **Additions**: Missing cards identified through experience
-- **Removals**: Cards that duplicate existing resources
-- **Changes**: Scope adjustments or title refinements  
-- **FAVORITES**: Mark the 20% of cards that deliver 80% of value
-
-### Step 1.5: LLM-Driven Final Optimization
-Run complete card inventory through LLM for:
-- Logical grouping and sequencing
-- Dependency identification and ordering
-- Gap detection in coverage areas
-- Standardization of titles and descriptions
-
-### Step 1.6: Organizational Structure Design
-Use LLM to design final Boards and Collections structure:
-- **Collections**: Major knowledge domains (Engineering, Product, Operations)
-- **Boards**: User journey stages or functional areas within collections
-- **Card Sequences**: Logical flow within boards
+Notes:
+- All sections are required even if empty (indicate "None").
+- Every evidence item MUST include a stable `EVIDENCE_ID` and a clear source label.
+- Prefer diffs/snippets; include full content only when essential.
 
 ---
 
 ## 🔧 Phase 2: Interactive Card Development
 
-*Execute this phase for each individual card, driven by the engineer most familiar with the topic*
+*Engineer-driven; operates on the Raw Context Markdown from Phase 1*
 
-### Step 2.1: Context Gathering & Analysis
-**Engineer selects target card from Phase 1 inventory and navigates to relevant codebase/documentation**
+### Phase 2 Conversational Flow
+1. **Input Prompt:** Ask the user to attach or paste the Phase 1 Raw Context Markdown file.
+2. **Initial Batch Generation:** Use the generator defined in `agent/PHASE 1/2_generate_cards.py` to create an initial batch of cards.
+3. **Coverage Loop (MANDATORY):** Continue making LLM calls until the set of generated cards covers all material in the raw context file. Coverage criteria:
+   - Each identified pain point, change theme, or workflow item maps to at least one card.
+   - No critical section in the raw context remains undocumented.
+   - Redundant cards are deduplicated; overlapping content is linked, not copied.
+4. **Publication (Abstracted GitHub Integration):** Instead of dumping all markdown in chat, publish cards to the user’s repository via the GitHub API.
+   - Suggested path: `docs/guru-cards/{board_or_topic}/{sanitized_title}.md`
+   - Include frontmatter with metadata (audience, purpose, priority, dependencies, confidence, evidence_sources).
+   - Maintain an index file `docs/guru-cards/index.json` for discoverability.
+5. **Refinement Agent:** Iterate per `agent/PHASE 2/PHASE_2_ENGINEER_COLLABORATION_INSTRUCTIONS.md`:
+   - Ask clarifying questions until the engineer says "perfect".
+   - Apply requested edits to the corresponding GitHub files.
+   - Validate against templates and success criteria.
+6. **Completion:** Mark Phase 2 complete after the engineer confirms all priority cards are accurate and sufficient.
 
-Use existing `codebase_search` and analysis tools to gather comprehensive context:
-- Related code files and functions
-- Existing documentation fragments
-- Configuration examples
-- Test cases and usage patterns
-- Error scenarios and troubleshooting info
+### Phase 2 Technical Notes
+- Reuse the templates in this document’s Phase 2 section for Technical/Process/Overview/Troubleshooting documents.
+- Use evidence-driven generation: every claim in a card should trace to an evidence item from Phase 1 (store `evidence_sources`).
+- Maintain a plan for sequencing and dependencies (foundation cards first).
 
-### Step 2.2: Guru Card Template Selection
-**AI automatically determines appropriate template based on success definitions:**
-
-#### **For Technical Documentation/API Reference:**
-```markdown
-# [Title] - Technical Reference
-
-**Audience:** [Specific role - e.g., "Frontend developers integrating authentication"]
-**Use Case:** [Specific scenario - e.g., "When implementing login flow"]
-**Time to Complete:** [Estimated time to solve problem]
-
----
-
-## 🎯 What You'll Accomplish
-[Single sentence describing the outcome]
-
-## 🏗️ System Overview
-[Architecture diagram - generated from mermaid]
-[2-3 sentence explanation of key components]
-
-## 🚀 Quick Start
-[Minimum viable implementation - copy/paste ready]
-
-## 📋 Detailed Implementation
-[Step-by-step with code examples]
-
-## 🔧 Configuration Options
-[Advanced settings and customization]
-
-## ❓ Troubleshooting
-[Common issues with solutions]
-
-## 🔗 Related Resources
-[Links to other Guru cards and external docs]
-```
-
-#### **For Process/Tutorial Documentation:**
-```markdown
-# [Title] - Process Guide
-
-**Audience:** [Specific role]
-**Prerequisites:** [Required knowledge/setup]
-**Time Required:** [Estimated duration]
-
----
-
-## 🎯 Process Overview
-[Process flow diagram - generated from mermaid]
-[What you'll accomplish and why it matters]
-
-## ✅ Prerequisites Checklist
-- [ ] [Prerequisite 1 with verification method]
-- [ ] [Prerequisite 2 with verification method]
-
-## 📋 Step-by-Step Process
-### Step 1: [Action-oriented title]
-[Detailed instructions with screenshots/code]
-**Expected Result:** [What should happen]
-**If this fails:** [Troubleshooting steps]
-
-[Continue for each step...]
-
-## 🔧 Advanced Options
-[Optional enhancements]
-
-## 📚 Next Steps
-[What to do after completing this process]
-```
-
-### Step 2.3: Iterative Content Refinement
-**AI-Engineer Collaboration Loop (continue until engineer approval):**
-
-**Round 1:** AI creates initial draft based on gathered context
-**Engineer Review:** Identifies gaps, inaccuracies, or improvements needed
-**Round 2:** AI refines content based on feedback
-**Engineer Review:** Further refinements...
-**Round N:** Continue until engineer says "This is exactly what the team needs"
-
-**Key AI Responsibilities During Iteration:**
-- Ask clarifying questions about edge cases
-- Request specific examples from engineer's experience
-- Validate technical accuracy against codebase
-- Ensure content matches target audience needs
-- Optimize for "time to solution" success metric
-
-### Step 2.4: Knowledge Integration & Quiz Validation
-**AI performs comprehensive knowledge integration:**
-
-1. **Source Integration**: Combines information from all relevant sources
-2. **Cross-Reference Check**: Ensures consistency with related cards
-3. **Knowledge Quiz**: AI tests its understanding by asking engineer questions like:
-   - "If someone followed this process and encountered [scenario], what should happen?"
-   - "What would be the most common mistake someone makes in step 3?"
-   - "How would you verify that the setup is working correctly?"
-
-4. **Quiz Validation**: Engineer confirms AI truly understands the topic
-5. **Content Finalization**: Only proceed when AI demonstrates mastery
-
-### Step 2.5: SME Review & Approval
-- **Technical Accuracy Review**: SME verifies all technical details
-- **Audience Appropriateness**: Confirms content serves target users
-- **Completeness Check**: Ensures no critical information is missing
-- **Final Approval**: SME signs off on content quality
-
----
 
 ## 🚀 Phase 3: Translation & Publication
 
-*Automated conversion using existing infrastructure*
+*Translate finalized Guru card files into Guru-ready HTML, convert Mermaid, and publish via Guru API*
 
-### Step 3.1: Mermaid Diagram Processing
-**Use existing mermaid infrastructure and MCP tools:**
+### Phase 3 Conversational Flow
+1. Confirm the set of finalized card files (as published in GitHub) to translate.
+2. Convert any Mermaid code blocks to images and embed per Guru formatting.
+3. Transform markdown into Guru-specific HTML with semantic classes and cross-references.
+4. Publish via Guru API and verify.
 
+### Implementation Guidance
+- Follow `agent/PHASE 3/Guru_Document_Generation_Instructions.md` for:
+  - Mermaid detection and `mcp_mermaid_generate` usage (see workspace rule: `mermaid-autogen`).
+  - HTML structure, image embedding, cross-reference link format.
+  - QA checklist and accessibility.
+
+
+## 🧪 Quality Gates & Verification (Expanded)
+- Phase 1 completes only after user approves the Raw Context file generated with the mandated template.
+- Phase 2 completes only after user approves refined cards and coverage criteria are met.
+- Phase 3 completes only after Guru publication passes QA checks and links/diagrams verify.
+
+---
+
+## Template Quick Reference (Expanded)
+
+### Raw Context Markdown Template
+```markdown
+# Raw Context – Consolidated Changes
+
+Generated: {ISO_TIMESTAMP}
+Change Period: {DESCRIPTION or DATE RANGE}
+Selected Sources:
+- {source_name} ({type}): {scope or path}
+- ...
+
+---
+
+## Executive Summary
+- Total Changes Analyzed: {N}
+- Primary Themes: {theme1}, {theme2}, {theme3}
+- Affected Workflows: {workflow1}, {workflow2}
+
+---
+
+## Changes by Source
+
+### {SOURCE_NAME} ({TYPE})
+- Change Window: {latest|since YYYY-MM-DD}
+- Summary:
+  - Added: {n} | Modified: {n} | Deleted: {n}
+
+#### Evidence
+- [{EVIDENCE_ID}] {CHANGE_TYPE} — {PATH/IDENTIFIER} @ {TIMESTAMP}
+
+```diff
+{OPTIONAL_DIFF_OR_SNIPPET}
+```
+
+[Repeat for each source]
+
+---
+
+## Changes by Type
+
+### Added
+- [{EVIDENCE_ID}] {SOURCE} — {PATH/IDENTIFIER}
+
+### Modified
+- [{EVIDENCE_ID}] {SOURCE} — {PATH/IDENTIFIER}
+
+### Deleted
+- [{EVIDENCE_ID}] {SOURCE} — {PATH/IDENTIFIER}
+
+---
+
+## Detailed Evidence
+
+### [{EVIDENCE_ID}] {SOURCE} — {CHANGE_TYPE}
+Metadata: {JSON or key/value}
+Timestamp: {ISO}
+
+```text
+{FULL_RELEVANT_CONTENT_OR_TRUNCATED_WITH_NOTE}
+```
+
+[Repeat for all evidence]
+```
+
+Notes:
+- All sections are required even if empty (indicate "None").
+- Every evidence item MUST include a stable `EVIDENCE_ID` and a clear source label.
+- Prefer diffs/snippets; include full content only when essential.
+```
+
+### Mermaid Conversion Template
 ```javascript
-// For each mermaid block found in content:
 mcp_mermaid_generate({
-  code: "[extracted mermaid code]",
-  name: "[descriptive_filename]", 
+  code: "[mermaid_code]",
+  name: "[descriptive_name]",
   folder: "./diagrams",
   theme: "forest",
   outputFormat: "png",
@@ -376,68 +399,12 @@ mcp_mermaid_generate({
 })
 ```
 
-### Step 3.2: Content Format Translation
-**Convert to Guru-specific HTML format using existing patterns:**
-
-- Use existing `Guru_Document_Generation_Instructions.md` formatting guidelines
-- Apply semantic HTML classes for Guru cards
-- Embed generated diagrams with proper sizing
-- Format code snippets and technical content
-- Add cross-reference links to related cards
-
-### Step 3.3: Guru API Integration
-**Use existing Guru MCP tools for publication:**
-
+### Guru Card Creation Template
 ```javascript
-// Create the card
 mcp_Zapier_guru_create_card({
   instructions: "Create [document_type] card for [topic]",
   title: "[title]",
   content: "[formatted_content_with_diagrams]",
-  collection_id: "[determined in Phase 1]"
-})
-
-// Add tags (use existing tagging infrastructure)
-mcp_Zapier_guru_add_tag_to_card({
-  instructions: "Add relevant tags for categorization",
-  card_id: "[generated card ID]",
-  tag_id: "[relevant tag IDs from guru_tag_generator.py]"
-})
-
-// Verify when ready
-mcp_Zapier_guru_verify_card({
-  instructions: "Verify card content is accurate and complete",
-  card_id: "[generated card ID]"
+  collection_id: "[collection_id]"
 })
 ```
-
-### Step 3.4: Quality Assurance
-**Automated validation using existing analyzer infrastructure:**
-- Run content through quality checks
-- Validate all links and references
-- Confirm diagram accessibility
-- Test card navigation and user flow
-- Generate verification report
-
----
-
-## 🔄 System Integration Points
-
-### **Leveraging Existing Infrastructure:**
-- **`analyzer.py`**: Powers gap analysis and content validation
-- **`guru_tag_generator.py`**: Provides intelligent tagging
-- **`Guru_Document_Generation_Instructions.md`**: Formatting standards
-- **Mermaid MCP tools**: Diagram generation and embedding
-- **Guru API tools**: Card creation and management
-
-### **New Components Required:**
-- **Phase 1 orchestration script**: Automates organizational discovery
-- **Phase 2 instruction templates**: Guide iterative development
-- **Integration workflows**: Connect all three phases seamlessly
-
-### **Success Tracking:**
-- **Card Usage Analytics**: Track which cards solve problems fastest
-- **Team Feedback Loops**: Regular reviews of card effectiveness
-- **Continuous Improvement**: Refine templates based on outcomes
-
----

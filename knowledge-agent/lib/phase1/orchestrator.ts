@@ -62,7 +62,7 @@ function buildDependencySummary(evidence: EvidenceItem[]): string {
 
 export async function runPhase1(params: Phase1Params) {
   // 1) gather evidence (github v1)
-  const github = params.sources[0];
+  const github = params.sources[0] as any; // Support both old and new structure
   const evidence = await fetchGithubEvidence(github);
 
   // Build dependency summary if any package.json summaries exist
@@ -105,9 +105,11 @@ export async function runPhase1(params: Phase1Params) {
   });
 
   // 4) propose filename
-  const start = github.sinceDate.replaceAll('-', '');
+  const contextModes = github.contextOptions ? github.contextOptions.map((opt: any) => opt.mode) : ['date-range'];
+  const modeString = contextModes.join('-');
+  const dateString = github.contextOptions?.find((opt: any) => opt.mode === 'date-range')?.sinceDate?.replaceAll('-', '') || 'NOW';
   const titleSuffix = 'Github';
-  const fileName = `raw-context-${titleSuffix}-${start}-to-NOW.md`;
+  const fileName = `raw-context-${titleSuffix}-${modeString}-${dateString}.md`;
   const filePath = `docs/raw-context/github/${fileName}`;
 
   return { content, evidenceCount: evidence.length, fileName, filePath, themes, workflows };

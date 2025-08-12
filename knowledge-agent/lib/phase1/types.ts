@@ -13,12 +13,31 @@ export interface EvidenceItem {
   snippet: string | null; // full diff or content
 }
 
+export type GithubContextMode = 'date-range' | 'file-selection' | 'commit-selection';
+
+export interface GithubDateRangeParams {
+  mode: 'date-range';
+  sinceDate: string; // YYYY-MM-DD
+}
+
+export interface GithubFileSelectionParams {
+  mode: 'file-selection';
+  selectedPaths: string[]; // array of file/directory paths
+}
+
+export interface GithubCommitSelectionParams {
+  mode: 'commit-selection';
+  selectedCommits: string[]; // array of commit SHAs
+}
+
+export type GithubContextParams = GithubDateRangeParams | GithubFileSelectionParams | GithubCommitSelectionParams;
+
 export interface GithubSourceParams {
   type: 'github';
   org: string; // 'peak-watch'
   repos: string[];
   branches: string[];
-  sinceDate: string; // YYYY-MM-DD
+  contextOptions: GithubContextParams[]; // can combine multiple context options
   // Large-file handling
   maxFileLines?: number; // if exceeded, apply largeFileStrategy
   maxFileBytes?: number; // if exceeded, apply largeFileStrategy
