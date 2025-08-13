@@ -72,7 +72,7 @@ export async function runPhase1(params: Phase1Params) {
   const labelText = summarizeLabels(evidence);
 
   const { text: themesText } = await generateText({
-    model: myProvider.languageModel('title-model'),
+    model: myProvider.languageModel('l'),
     system:
       'Extract 3-5 concise themes from the provided labels. Return a comma-separated list without extra prose.',
     prompt: labelText || 'general',
