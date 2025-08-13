@@ -18,14 +18,31 @@ const FileSchema = z.object({
           'image/jpeg',
           'image/png',
           'text/markdown',
+          'text/x-markdown',
+          'application/markdown',
           'text/plain',
-          'application/octet-stream', // some browsers may send this for .md
+          'application/octet-stream', // some browsers may send this for .md or unknown
         ].includes(file.type),
       {
-        message: 'File type should be JPEG, PNG, Markdown (.md), or Plain Text',
+        message:
+          'File type should be JPEG, PNG, Markdown (.md), or Plain Text',
       },
     ),
 });
+
+function sanitizeFilename(name: string): string {
+  const withoutPath = name.split(/[\\/]/).pop() || 'upload';
+  return withoutPath.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function inferExtensionFromContentType(contentType: string | undefined): string {
+  if (!contentType) return '';
+  if (contentType === 'text/markdown' || contentType === 'text/x-markdown' || contentType === 'application/markdown') return '.md';
+  if (contentType === 'text/plain' || contentType === 'application/octet-stream') return '.txt';
+  if (contentType === 'image/jpeg') return '.jpg';
+  if (contentType === 'image/png') return '.png';
+  return '';
+}
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -40,7 +57,7 @@ export async function POST(request: Request) {
 
   try {
     const formData = await request.formData();
-    const file = formData.get('file') as Blob;
+    const file = formData.get('file') as Blob | null;
 
     if (!file) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
@@ -56,18 +73,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: errorMessage }, { status: 400 });
     }
 
-    // Get filename from formData since Blob doesn't have name property
-    const filename = (formData.get('file') as File).name;
+    // Get filename safely; Blob may not have a name
+    const maybeFile = formData.get('file') as unknown as { name?: string } | null;
+    const originalName = maybeFile?.name || 'upload';
+    const safeName = sanitizeFilename(originalName);
+
+    const contentType = (file as any).type as string | undefined;
+    const ext = inferExtensionFromContentType(contentType);
+    const finalName = safeName.endsWith(ext) || ext === '' ? safeName : `${safeName}${ext}`;
+    const pathname = `uploads/${session.user?.id || 'anonymous'}/${Date.now()}-${finalName}`;
+
     const fileBuffer = await file.arrayBuffer();
 
     try {
-      const data = await put(`${filename}`, fileBuffer, {
+      const data = await put(pathname, fileBuffer, {
         access: 'public',
+        contentType: contentType || undefined,
       });
 
       return NextResponse.json(data);
-    } catch (error) {
-      return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
+    } catch (error: any) {
+      // Surface more actionable diagnostics in development
+      const message = typeof error?.message === 'string' ? error.message : 'Upload failed';
+      const isTokenMissing = message.includes('BLOB_READ_WRITE_TOKEN');
+      return NextResponse.json(
+        {
+          error: isTokenMissing
+            ? 'Blob storage not configured: set BLOB_READ_WRITE_TOKEN in your environment.'
+            : process.env.NODE_ENV !== 'production'
+              ? message
+              : 'Upload failed',
+        },
+        { status: 500 },
+      );
     }
   } catch (error) {
     return NextResponse.json(

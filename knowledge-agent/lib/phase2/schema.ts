@@ -46,3 +46,4 @@ export const Phase2ResponseSchema = z.object({
 
 export type Phase2Response = z.infer<typeof Phase2ResponseSchema>;
 export type Phase2Card = z.infer<typeof CardSchema>;
+ 
