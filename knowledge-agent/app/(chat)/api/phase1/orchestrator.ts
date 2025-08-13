@@ -2,7 +2,7 @@ import { generateText } from 'ai';
 import type { Phase1Params, EvidenceItem } from './types';
 import { fetchGithubEvidence } from './fetch-github';
 import { renderRawContextMarkdown } from './render';
-import { myProvider } from '../ai/providers';
+import { myProvider } from '@/lib/ai/providers';
 
 function summarizeLabels(items: EvidenceItem[]): string {
   const labels = new Set<string>();

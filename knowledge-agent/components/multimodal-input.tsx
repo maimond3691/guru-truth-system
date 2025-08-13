@@ -303,6 +303,7 @@ function PureMultimodalInput({
             input={input}
             submitForm={submitForm}
             uploadQueue={uploadQueue}
+            hasAttachments={attachments.length > 0}
           />
         )}
       </div>
@@ -371,32 +372,35 @@ function PureStopButton({
 const StopButton = memo(PureStopButton);
 
 function PureSendButton({
-  submitForm,
-  input,
-  uploadQueue,
+	submitForm,
+	input,
+	uploadQueue,
+	hasAttachments,
 }: {
-  submitForm: () => void;
-  input: string;
-  uploadQueue: Array<string>;
+	submitForm: () => void;
+	input: string;
+	uploadQueue: Array<string>;
+	hasAttachments: boolean;
 }) {
-  return (
-    <Button
-      data-testid="send-button"
-      className="rounded-full p-1.5 h-fit border dark:border-zinc-600"
-      onClick={(event) => {
-        event.preventDefault();
-        submitForm();
-      }}
-      disabled={input.length === 0 || uploadQueue.length > 0}
-    >
-      <ArrowUpIcon size={14} />
-    </Button>
-  );
+	return (
+		<Button
+			data-testid="send-button"
+			className="rounded-full p-1.5 h-fit border dark:border-zinc-600"
+			onClick={(event) => {
+				event.preventDefault();
+				submitForm();
+			}}
+			disabled={(input.length === 0 && !hasAttachments) || uploadQueue.length > 0}
+		>
+			<ArrowUpIcon size={14} />
+		</Button>
+	);
 }
 
 const SendButton = memo(PureSendButton, (prevProps, nextProps) => {
-  if (prevProps.uploadQueue.length !== nextProps.uploadQueue.length)
-    return false;
-  if (prevProps.input !== nextProps.input) return false;
-  return true;
+	if (prevProps.uploadQueue.length !== nextProps.uploadQueue.length)
+		return false;
+	if (prevProps.input !== nextProps.input) return false;
+	if (prevProps.hasAttachments !== nextProps.hasAttachments) return false;
+	return true;
 });

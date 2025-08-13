@@ -3,6 +3,7 @@
     "@peng-shawn/mermaid-mcp-server": "^0.2.0"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^2.0.10"
+    "@ai-sdk/openai": "^2.0.10",
+    "vercel": "^44.7.3"
   }
 }

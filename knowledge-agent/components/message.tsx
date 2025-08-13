@@ -18,6 +18,37 @@ import { MessageReasoning } from './message-reasoning';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import type { ChatMessage } from '@/lib/types';
 import { useDataStream } from './data-stream-provider';
+import { useArtifact } from '@/hooks/use-artifact';
+
+function ProceedCanvas({ cta }: { cta: string }) {
+  const { setArtifact } = useArtifact();
+  try {
+    const match = cta.match(/\[\[PROCEED_CANVAS\|(.+)\]\]/);
+    const payload = match ? JSON.parse(match[1]) : null;
+    if (!payload || !payload.id) return null;
+
+    return (
+      <div className="pt-2">
+        <Button
+          onClick={() =>
+            setArtifact((curr) => ({
+              ...curr,
+              isVisible: true,
+              documentId: payload.id,
+              title: payload.title || 'Guru Canvas',
+              kind: 'text',
+              status: 'idle',
+            }))
+          }
+        >
+          Proceed
+        </Button>
+      </div>
+    );
+  } catch {
+    return null;
+  }
+}
 
 // Type narrowing is handled by TypeScript's control flow analysis
 // The AI SDK provides proper discriminated unions for tool calls
@@ -142,6 +173,10 @@ const PurePreviewMessage = ({
                         })}
                       >
                         <Markdown>{sanitizeText(part.text)}</Markdown>
+
+                        {message.role === 'assistant' && part.text?.includes('[[PROCEED_CANVAS|') && (
+                          <ProceedCanvas cta={part.text} />
+                        )}
                       </div>
                     </div>
                   );

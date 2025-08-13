@@ -109,8 +109,7 @@ Quality checklist (each card must):
 - ✅ Include troubleshooting for likely issues
 - ✅ Reference specific evidence from the document (sections, file paths, IDs, SHAs)
 - ✅ Enable successful task completion within reasonable time
-- ✅ Be included if and only if justified by evidence; continue generating more cards as long as justification exists.
-`;
+- ✅ Be included if and only if justified by evidence; continue generating more cards as long as justification exists.`;
 }
 
 export function buildPhase2UserPrompt({ rawContextMarkdown }: { rawContextMarkdown: string }) {
@@ -124,5 +123,4 @@ export function buildPhase2UserPrompt({ rawContextMarkdown }: { rawContextMarkdo
 		rawContextMarkdown,
 		'RAW_CONTEXT_END',
 	].join('\n');
-}
- 
+} 

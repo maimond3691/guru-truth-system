@@ -2,8 +2,8 @@ import { auth } from '@/app/(auth)/auth';
 import { ChatSDKError } from '@/lib/errors';
 import { myProvider } from '@/lib/ai/providers';
 import { generateObject } from 'ai';
-import { buildPhase2SystemPrompt, buildPhase2UserPrompt } from '@/lib/phase2/prompt';
-import { Phase2ResponseSchema } from '@/lib/phase2/schema';
+import { buildPhase2SystemPrompt, buildPhase2UserPrompt } from './prompt';
+import { Phase2ResponseSchema } from './schema';
 import { getDocumentsById } from '@/lib/db/queries';
 
 export async function POST(request: Request) {

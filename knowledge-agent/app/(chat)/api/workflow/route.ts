@@ -2,13 +2,14 @@ import { createUIMessageStream, JsonToSseTransformStream } from 'ai';
 import { auth } from '@/app/(auth)/auth';
 import { ChatSDKError } from '@/lib/errors';
 import type { ChatMessage } from '@/lib/types';
-import type { Session } from 'next-auth';
+
 import { selectAgent } from '@/lib/agents/registry';
 import {
   saveChat,
   saveMessages,
   getChatById,
   getMessagesByChatId,
+  saveDocument,
 } from '@/lib/db/queries';
 import { 
   convertUIMessagesToDBFormat, 
@@ -17,12 +18,9 @@ import {
   generateUUID 
 } from '@/lib/utils';
 import { generateTitleFromUserMessage } from '@/app/(chat)/actions';
+// Phase 2 schema for validating the API response
+import { processPhase2FromMarkdown } from '../phase2/service';
 
-function buildTools(session: Session, dataStream: any, activeToolIds: string[]) {
-  // Removed tool building logic since this is a workflow-focused endpoint
-  const tools = {};
-  return tools;
-}
 
 export async function POST(request: Request) {
   try {
@@ -126,12 +124,48 @@ export async function POST(request: Request) {
     });
 
     const stream = createUIMessageStream<ChatMessage>({
-      async execute() {
+      async execute({ writer }) {
         try {
-          // Intentionally no model generation here. The workflow UI components
-          // (forms and summaries) drive the interaction for this endpoint.
-          // Tools are constructed for potential future, explicit tool calls,
-          // but we do not emit plain assistant text from the model.
+          // Show progress message immediately
+          const progressMsg: ChatMessage = {
+            id: generateUUID(),
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'Generating Initial Guru Docs…' }],
+            metadata: { createdAt: new Date().toISOString() },
+          };
+          writer.write({ type: 'data-appendMessage', data: JSON.stringify(progressMsg), transient: true });
+          try {
+            const dbMsgs = convertUIMessagesToDBFormat([progressMsg], chatId).map(m => ({ ...m, createdAt: new Date() }));
+            await saveMessages({ messages: dbMsgs });
+          } catch {}
+
+          // Phase 2: detect markdown attachment and delegate to the phase service
+          const fileParts = (userMessage?.parts || []).filter((p: any) => (p as any).type === 'file') as any[];
+          const mdPart = fileParts.find((p: any) => {
+            const name = (p.name || '').toLowerCase();
+            const media = (p.mediaType || '').toLowerCase();
+            return name.endsWith('.md') || media.includes('markdown') || media === 'text/plain';
+          });
+
+          if (mdPart) {
+            try {
+              const resp = await fetch((mdPart as any).url);
+              const rawContextMarkdown = await resp.text();
+              if (rawContextMarkdown.trim()) {
+                await processPhase2FromMarkdown({
+                  request,
+                  chatId,
+                  sessionUserId: session.user.id,
+                  markdown: rawContextMarkdown,
+                  writer,
+                });
+              }
+            } catch (e) {
+              console.error('Phase 2 processing failed', e);
+            }
+          }
+
+          // For now, no model-generated streaming text here for other cases
           return;
         } catch {
           // Swallow errors; do not append any assistant message.

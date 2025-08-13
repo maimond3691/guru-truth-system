@@ -1,9 +1,8 @@
 import { auth } from '@/app/(auth)/auth';
 import { ChatSDKError } from '@/lib/errors';
-import { saveDocument, getDocumentsById } from '@/lib/db/queries';
-import { runPhase1 } from '@/lib/phase1/orchestrator';
-import type { Phase1FrontmatterState, Phase1Params } from '@/lib/phase1/types';
-import { getValidGoogleAccessToken } from '@/lib/db/queries';
+import { saveDocument, getDocumentsById, getValidGoogleAccessToken } from '@/lib/db/queries';
+import { runPhase1 } from './orchestrator';
+import type { Phase1FrontmatterState, Phase1Params } from './types';
 
 async function listAllOrgRepos(org: string, token: string) {
   const repos: string[] = [];
