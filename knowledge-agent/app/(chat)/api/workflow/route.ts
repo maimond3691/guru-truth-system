@@ -122,24 +122,51 @@ export async function POST(request: Request) {
           const mdPart = fileParts.find((p: any) => {
             const name = (p.name || '').toLowerCase();
             const media = (p.mediaType || '').toLowerCase();
-            return name.endsWith('.md') || media.includes('markdown') || media === 'text/plain';
+            
+            // Check for various markdown file patterns
+            const nameContainsMd = name.includes('.md') || name.endsWith('.md') || name.endsWith('.markdown');
+            const mediaIsText = media.includes('markdown') || media === 'text/plain' || media === 'application/octet-stream';
+            
+            // Accept if name contains .md and media type is text-like
+            return nameContainsMd && mediaIsText;
           });
 
           if (mdPart) {
             try {
               const resp = await fetch((mdPart as any).url);
               const rawContextMarkdown = await resp.text();
+              
               if (rawContextMarkdown.trim()) {
-                await processPhase2FromMarkdown({
+                const result = await processPhase2FromMarkdown({
                   request,
                   chatId,
                   sessionUserId: session.user.id,
                   markdown: rawContextMarkdown,
                   writer,
                 });
+                
+                if (!result) {
+                  // If processPhase2FromMarkdown returns false, append an error message
+                  const errorMsg: ChatMessage = {
+                    id: generateUUID(),
+                    role: 'assistant',
+                    parts: [{ type: 'text', text: 'Sorry, there was an error processing your markdown file. Please try again.' }],
+                    metadata: { createdAt: new Date().toISOString() },
+                  };
+                  writer.write({ type: 'data-appendMessage', data: JSON.stringify(errorMsg), transient: true });
+                }
               }
             } catch (e) {
-              console.error('Phase 2 processing failed', e);
+              console.error('Phase 2 processing failed:', e);
+              
+              // Append an error message to the stream
+              const errorMsg: ChatMessage = {
+                id: generateUUID(),
+                role: 'assistant',
+                parts: [{ type: 'text', text: 'Sorry, there was an error processing your markdown file. Please try again.' }],
+                metadata: { createdAt: new Date().toISOString() },
+              };
+              writer.write({ type: 'data-appendMessage', data: JSON.stringify(errorMsg), transient: true });
             }
           }
 

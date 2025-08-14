@@ -35,8 +35,17 @@ function sanitizeFilename(name: string): string {
   return withoutPath.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-function inferExtensionFromContentType(contentType: string | undefined): string {
+function inferExtensionFromContentType(contentType: string | undefined, originalName?: string): string {
   if (!contentType) return '';
+  
+  // If the original filename already has a markdown extension, preserve it
+  if (originalName) {
+    const lowerName = originalName.toLowerCase();
+    if (lowerName.endsWith('.md') || lowerName.endsWith('.markdown')) {
+      return ''; // Don't add any extension, preserve the original
+    }
+  }
+  
   if (contentType === 'text/markdown' || contentType === 'text/x-markdown' || contentType === 'application/markdown') return '.md';
   if (contentType === 'text/plain' || contentType === 'application/octet-stream') return '.txt';
   if (contentType === 'image/jpeg') return '.jpg';
@@ -79,7 +88,7 @@ export async function POST(request: Request) {
     const safeName = sanitizeFilename(originalName);
 
     const contentType = (file as any).type as string | undefined;
-    const ext = inferExtensionFromContentType(contentType);
+    const ext = inferExtensionFromContentType(contentType, originalName);
     const finalName = safeName.endsWith(ext) || ext === '' ? safeName : `${safeName}${ext}`;
     const pathname = `uploads/${session.user?.id || 'anonymous'}/${Date.now()}-${finalName}`;
 

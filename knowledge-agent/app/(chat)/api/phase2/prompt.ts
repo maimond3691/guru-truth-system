@@ -112,13 +112,20 @@ Quality checklist (each card must):
 - ✅ Be included if and only if justified by evidence; continue generating more cards as long as justification exists.`;
 }
 
-export function buildPhase2UserPrompt({ rawContextMarkdown }: { rawContextMarkdown: string }) {
+export function buildPhase2UserPrompt({ 
+	rawContextMarkdown, 
+	chunkContext 
+}: { 
+	rawContextMarkdown: string;
+	chunkContext?: string;
+}) {
 	const schemaJson = JSON.stringify(Phase2ResponseSchema.shape, null, 2);
 	return [
 		'SCHEMA_BEGIN',
 		schemaJson,
 		'SCHEMA_END',
 		'',
+		chunkContext || '',
 		'RAW_CONTEXT_BEGIN',
 		rawContextMarkdown,
 		'RAW_CONTEXT_END',

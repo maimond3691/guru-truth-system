@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { MessageEditor } from './message-editor';
 import { DocumentPreview } from './document-preview';
 import { MessageReasoning } from './message-reasoning';
+import { Phase2ProgressMessage } from './phase2-progress-message';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import type { ChatMessage } from '@/lib/types';
 import { useDataStream } from './data-stream-provider';
@@ -172,7 +173,19 @@ const PurePreviewMessage = ({
                             message.role === 'user',
                         })}
                       >
-                        <Markdown>{sanitizeText(part.text)}</Markdown>
+                        {/* Render Phase 2 progress messages with special animation */}
+                        {message.role === 'assistant' && part.text && (
+                          part.text.includes('Large Document Detected') ||
+                          part.text.includes('CHUNKING') ||
+                          part.text.includes('PROCESSING') ||
+                          part.text.includes('WAITING') ||
+                          part.text.includes('COMPLETE') ||
+                          part.text.includes('ERROR')
+                        ) ? (
+                          <Phase2ProgressMessage text={sanitizeText(part.text)} />
+                        ) : (
+                          <Markdown>{sanitizeText(part.text)}</Markdown>
+                        )}
 
                         {message.role === 'assistant' && part.text?.includes('[[PROCEED_CANVAS|') && (
                           <ProceedCanvas cta={part.text} />
