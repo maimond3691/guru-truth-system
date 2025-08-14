@@ -3,13 +3,11 @@ import { auth } from '@/app/(auth)/auth';
 import { ChatSDKError } from '@/lib/errors';
 import type { ChatMessage } from '@/lib/types';
 
-import { selectAgent } from '@/lib/agents/registry';
 import {
   saveChat,
   saveMessages,
   getChatById,
   getMessagesByChatId,
-  saveDocument,
 } from '@/lib/db/queries';
 import { 
   convertUIMessagesToDBFormat, 
@@ -18,9 +16,7 @@ import {
   generateUUID 
 } from '@/lib/utils';
 import { generateTitleFromUserMessage } from '@/app/(chat)/actions';
-// Phase 2 schema for validating the API response
 import { processPhase2FromMarkdown } from '../phase2/service';
-
 
 export async function POST(request: Request) {
   try {
@@ -93,35 +89,17 @@ export async function POST(request: Request) {
 
     // Save new messages to database
     if (newMessages.length > 0) {
-      console.log('Attempting to save messages:', newMessages.length);
-      console.log('Sample message:', JSON.stringify(newMessages[0], null, 2));
-      
       try {
         const dbMessages = convertUIMessagesToDBFormat(newMessages, chatId);
-        console.log('Converted DB message:', JSON.stringify(dbMessages[0], null, 2));
-        
         const messagesWithTimestamp = dbMessages.map(msg => ({
           ...msg,
           createdAt: new Date(),
         }));
-        
-        console.log('Final message for DB:', JSON.stringify(messagesWithTimestamp[0], null, 2));
-        
         await saveMessages({ messages: messagesWithTimestamp });
-        console.log('Successfully saved messages');
       } catch (error) {
-        console.error('Error saving messages:', error);
-        // Don't fail the entire request if message saving fails
-        // The main functionality should still work
+        // Continue even if message persistence fails
       }
     }
-
-    // Select phase agent (default phase-1 for now)
-    const agent = selectAgent({ 
-      chatId: body.id, 
-      messageCount: allMessages.length, 
-      hintPhaseId: body.hintPhaseId 
-    });
 
     const stream = createUIMessageStream<ChatMessage>({
       async execute({ writer }) {
@@ -165,7 +143,6 @@ export async function POST(request: Request) {
             }
           }
 
-          // For now, no model-generated streaming text here for other cases
           return;
         } catch {
           // Swallow errors; do not append any assistant message.
@@ -175,7 +152,6 @@ export async function POST(request: Request) {
 
     return new Response(stream.pipeThrough(new JsonToSseTransformStream()), { status: 200 });
   } catch (error) {
-    console.error('Workflow API error:', error);
     return new ChatSDKError('bad_request:api').toResponse();
   }
 }
