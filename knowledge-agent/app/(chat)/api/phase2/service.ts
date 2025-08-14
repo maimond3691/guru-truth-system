@@ -83,11 +83,11 @@ export async function processPhase2FromMarkdown(opts: {
                   role: 'assistant',
                   parts: [{ 
                     type: 'text', 
-                    text: `⚡ **${event.phase.toUpperCase()}**: ${event.message}${event.cardsInChunk ? ` (+${event.cardsInChunk} cards)` : ''}` 
+                    text: `PROCESSING chunk ${event.currentChunk}/${event.totalChunks}: ${event.message}${event.cardsInChunk ? ` (+${event.cardsInChunk} cards)` : ''}` 
                   }],
                   metadata: { createdAt: new Date().toISOString() },
                 };
-                writer.write({ type: 'data-updateMessage', data: JSON.stringify(statusMsg), transient: true });
+                writer.write({ type: 'data-appendMessage', data: JSON.stringify(statusMsg), transient: true });
               } else if (event.type === 'complete') {
                 finalResult = event.data;
                 const completionMsg: ChatMessage = {
@@ -95,11 +95,11 @@ export async function processPhase2FromMarkdown(opts: {
                   role: 'assistant',
                   parts: [{ 
                     type: 'text', 
-                    text: `✅ **PROCESSING COMPLETE**: ${event.message}` 
+                    text: `PROCESSING COMPLETE: ${event.message}` 
                   }],
                   metadata: { createdAt: new Date().toISOString() },
                 };
-                writer.write({ type: 'data-updateMessage', data: JSON.stringify(completionMsg), transient: true });
+                writer.write({ type: 'data-appendMessage', data: JSON.stringify(completionMsg), transient: true });
                 break;
               } else if (event.type === 'error') {
                 const errorMsg: ChatMessage = {
@@ -107,7 +107,7 @@ export async function processPhase2FromMarkdown(opts: {
                   role: 'assistant',
                   parts: [{ 
                     type: 'text', 
-                    text: `❌ **ERROR**: ${event.message}` 
+                    text: `ERROR: ${event.message}` 
                   }],
                   metadata: { createdAt: new Date().toISOString() },
                 };
@@ -203,51 +203,51 @@ export async function processPhase2FromMarkdown(opts: {
       console.error('Phase 2 schema validation failed:', parsed.error);
       return false;
     }
+
+    const title = 'Phase 2 — Initial Guru Docs';
+    const mdLines: string[] = [];
+    mdLines.push(`# ${title}`);
+    mdLines.push('');
+    mdLines.push(`Generated ${parsed.data.card_count} cards.`);
+    mdLines.push('');
+    parsed.data.cards.forEach((card, i) => {
+      mdLines.push(`## ${i + 1}. ${card.title}`);
+      mdLines.push('');
+      mdLines.push(`- Audience: ${card.audience}`);
+      mdLines.push(`- Pain: ${card.pain}`);
+      mdLines.push('');
+      mdLines.push(card.content_markdown);
+      mdLines.push('');
+      mdLines.push('---');
+      mdLines.push('');
+    });
+    const content = mdLines.join('\n');
+
+    const docId = generateUUID();
+    await saveDocument({ id: docId, title, kind: 'text', content, userId: sessionUserId });
+
+    const assistantMsg: ChatMessage = {
+      id: generateUUID(),
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: `Enter Canvas Mode to Review & Refine Guru Documentation\n\n[[PROCEED_CANVAS|{"id":"${docId}","title":"${title}"}]]` },
+      ],
+      metadata: { createdAt: new Date().toISOString() },
+    };
+    
+    writer.write({ type: 'data-appendMessage', data: JSON.stringify(assistantMsg), transient: true });
+
+    try {
+      const { convertUIMessagesToDBFormat } = await import('@/lib/utils');
+      const dbMsgs = convertUIMessagesToDBFormat([assistantMsg], chatId).map(m => ({
+        ...m,
+        createdAt: new Date(),
+      }));
+      await saveMessages({ messages: dbMsgs });
+    } catch (error) {
+      console.error('Failed to save assistant message:', error);
+    }
+
+    return true;
   }
-
-  const title = 'Phase 2 — Initial Guru Docs';
-  const mdLines: string[] = [];
-  mdLines.push(`# ${title}`);
-  mdLines.push('');
-  mdLines.push(`Generated ${parsed.data.card_count} cards.`);
-  mdLines.push('');
-  parsed.data.cards.forEach((card, i) => {
-    mdLines.push(`## ${i + 1}. ${card.title}`);
-    mdLines.push('');
-    mdLines.push(`- Audience: ${card.audience}`);
-    mdLines.push(`- Pain: ${card.pain}`);
-    mdLines.push('');
-    mdLines.push(card.content_markdown);
-    mdLines.push('');
-    mdLines.push('---');
-    mdLines.push('');
-  });
-  const content = mdLines.join('\n');
-
-  const docId = generateUUID();
-  await saveDocument({ id: docId, title, kind: 'text', content, userId: sessionUserId });
-
-  const assistantMsg: ChatMessage = {
-    id: generateUUID(),
-    role: 'assistant',
-    parts: [
-      { type: 'text', text: `Enter Canvas Mode to Review & Refine Guru Documentation\n\n[[PROCEED_CANVAS|{"id":"${docId}","title":"${title}"}]]` },
-    ],
-    metadata: { createdAt: new Date().toISOString() },
-  };
-  
-  writer.write({ type: 'data-appendMessage', data: JSON.stringify(assistantMsg), transient: true });
-
-  try {
-    const { convertUIMessagesToDBFormat } = await import('@/lib/utils');
-    const dbMsgs = convertUIMessagesToDBFormat([assistantMsg], chatId).map(m => ({
-      ...m,
-      createdAt: new Date(),
-    }));
-    await saveMessages({ messages: dbMsgs });
-  } catch (error) {
-    console.error('Failed to save assistant message:', error);
-  }
-
-  return true;
 } 

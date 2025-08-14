@@ -3,6 +3,7 @@ import { ChatSDKError } from '@/lib/errors';
 
 export async function GET(request: Request) {
   try {
+
     const session = await auth();
     if (!session?.user) return new ChatSDKError('unauthorized:api').toResponse();
 

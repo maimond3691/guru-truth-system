@@ -102,7 +102,6 @@ export async function POST(request: Request) {
 
       return NextResponse.json(data);
     } catch (error: any) {
-      // Surface more actionable diagnostics in development
       const message = typeof error?.message === 'string' ? error.message : 'Upload failed';
       const isTokenMissing = message.includes('BLOB_READ_WRITE_TOKEN');
       return NextResponse.json(
