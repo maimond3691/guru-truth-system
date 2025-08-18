@@ -1,7 +1,8 @@
 import { Phase2ResponseSchema } from './schema';
 
 export function buildPhase2SystemPrompt() {
-	return `You are “Guru Card Generator,” a senior technical writer and knowledge architect.
+	console.log('🤖 Building Phase 2 system prompt...');
+	const systemPrompt = `You are "Guru Card Generator," a senior technical writer and knowledge architect.
 Your task: read a Phase 1 Raw Context Markdown document and generate a complete, exhaustive set of Guru cards that are evidence-backed and actionable.
 
 Read this document in two passes:
@@ -110,24 +111,48 @@ Quality checklist (each card must):
 - ✅ Reference specific evidence from the document (sections, file paths, IDs, SHAs)
 - ✅ Enable successful task completion within reasonable time
 - ✅ Be included if and only if justified by evidence; continue generating more cards as long as justification exists.`;
+	
+	console.log(`✅ Phase 2 system prompt built. Length: ${systemPrompt.length} characters`);
+	return systemPrompt;
 }
 
 export function buildPhase2UserPrompt({ 
 	rawContextMarkdown, 
-	chunkContext 
+	chunkContext,
+	frontmatter
 }: { 
 	rawContextMarkdown: string;
 	chunkContext?: string;
+	frontmatter?: string;
 }) {
+	console.log('💬 Building Phase 2 user prompt...');
+	console.log(`📄 Raw context markdown length: ${rawContextMarkdown.length} characters`);
+	console.log(`🔗 Chunk context provided: ${!!chunkContext}`);
+	if (chunkContext) {
+		console.log(`🔗 Chunk context length: ${chunkContext.length} characters`);
+	}
+	console.log(`📋 Frontmatter provided: ${!!frontmatter}`);
+	if (frontmatter) {
+		console.log(`📋 Frontmatter length: ${frontmatter.length} characters`);
+	}
+	
 	const schemaJson = JSON.stringify(Phase2ResponseSchema.shape, null, 2);
-	return [
+	console.log(`📋 Schema JSON length: ${schemaJson.length} characters`);
+	
+	const userPrompt = [
 		'SCHEMA_BEGIN',
 		schemaJson,
 		'SCHEMA_END',
 		'',
 		chunkContext || '',
+		frontmatter ? 'FRONTMATTER_BEGIN' : '',
+		frontmatter ? frontmatter : '',
+		frontmatter ? 'FRONTMATTER_END' : '',
 		'RAW_CONTEXT_BEGIN',
 		rawContextMarkdown,
 		'RAW_CONTEXT_END',
 	].join('\n');
+	
+	console.log(`✅ Phase 2 user prompt built. Total length: ${userPrompt.length} characters`);
+	return userPrompt;
 } 

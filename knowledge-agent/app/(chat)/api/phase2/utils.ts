@@ -2,11 +2,16 @@ import type { Phase2Response } from './schema';
 
 // Conservative token estimation: ~4 chars per token
 const CHARS_PER_TOKEN = 4;
-const MAX_TOKENS_PER_CHUNK = 150000; // Leave buffer for system prompt and response
+const MAX_TOKENS_PER_CHUNK = 200000; // User requested 200K token limit
 const MAX_CHARS_PER_CHUNK = MAX_TOKENS_PER_CHUNK * CHARS_PER_TOKEN;
 
 export function estimateTokenCount(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
+  const tokens = Math.ceil(text.length / CHARS_PER_TOKEN);
+  // Only log for significant estimations to reduce noise
+  if (tokens > 1000) {
+    console.log(`🧮 Token estimation: ${text.length.toLocaleString()} chars ÷ ${CHARS_PER_TOKEN} = ${tokens.toLocaleString()} tokens`);
+  }
+  return tokens;
 }
 
 interface DocumentChunk {
@@ -17,83 +22,111 @@ interface DocumentChunk {
 }
 
 export function chunkMarkdownDocument(markdown: string): DocumentChunk[] {
-  const estimatedTokens = estimateTokenCount(markdown);
+  console.log('🔪 Starting simplified document chunking process...');
+  console.log(`📏 Original document length: ${markdown.length.toLocaleString()} characters`);
   
-  if (estimatedTokens <= MAX_TOKENS_PER_CHUNK) {
-    return [{
-      content: markdown,
-      chunkIndex: 0,
-      totalChunks: 1
-    }];
-  }
-
-  const chunks: DocumentChunk[] = [];
-  let frontmatter = '';
-  let remainingContent = markdown;
-
-  // Extract frontmatter (between first two --- lines)
-  const frontmatterMatch = markdown.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (frontmatterMatch) {
-    frontmatter = `---\n${frontmatterMatch[1]}\n---\n`;
-    remainingContent = frontmatterMatch[2];
-  }
-
-  // Split by major sections while preserving structure
-  const sections = splitIntoSections(remainingContent);
-  const totalChunks = Math.ceil(estimatedTokens / MAX_TOKENS_PER_CHUNK);
+  // Extract frontmatter once and preserve it for all chunks
+  let content = markdown;
+  let frontmatter: string | undefined;
   
-  let currentChunk = '';
-  let chunkIndex = 0;
-  
-  for (const section of sections) {
-    const sectionWithFrontmatter = frontmatter + currentChunk + section;
-    
-    if (estimateTokenCount(sectionWithFrontmatter) > MAX_TOKENS_PER_CHUNK && currentChunk) {
-      // Current chunk is full, save it and start new one
-      chunks.push({
-        content: frontmatter + currentChunk.trim(),
-        chunkIndex,
-        totalChunks,
-        frontmatter: frontmatter || undefined
-      });
-      
-      chunkIndex++;
-      currentChunk = section;
-    } else {
-      currentChunk += section;
+  if (markdown.startsWith('---')) {
+    console.log('📋 Frontmatter detected, excluding it from chunks...');
+    const endIndex = markdown.indexOf('---', 3);
+    if (endIndex !== -1) {
+      frontmatter = markdown.slice(0, endIndex + 3) + '\n';
+      content = markdown.slice(endIndex + 3).trim();
+      console.log(`📋 Frontmatter excluded: ${frontmatter.length} characters`);
+      console.log(`📄 Content to chunk: ${content.length.toLocaleString()} characters`);
     }
   }
   
-  // Add the last chunk
-  if (currentChunk.trim()) {
-    chunks.push({
-      content: frontmatter + currentChunk.trim(),
-      chunkIndex,
-      totalChunks: chunks.length + 1,
-      frontmatter: frontmatter || undefined
-    });
+  // Estimate total tokens and determine if chunking is needed
+  const totalTokens = estimateTokenCount(content);
+  console.log(`🧮 Total content tokens: ${totalTokens.toLocaleString()}`);
+  
+  if (totalTokens <= MAX_TOKENS_PER_CHUNK) {
+    console.log('✅ Content fits in single chunk, no splitting needed');
+    const singleChunk: DocumentChunk = {
+      content: content,
+      chunkIndex: 0,
+      totalChunks: 1,
+      frontmatter // Preserve frontmatter for prompt construction
+    };
+    console.log(`✅ Single chunk created: ${estimateTokenCount(singleChunk.content).toLocaleString()} tokens`);
+    return [singleChunk];
   }
-
-  // Update totalChunks for all chunks
-  const actualTotalChunks = chunks.length;
-  chunks.forEach(chunk => {
-    chunk.totalChunks = actualTotalChunks;
+  
+  // Calculate optimal chunk size for even distribution
+  const totalChunks = Math.ceil(totalTokens / MAX_TOKENS_PER_CHUNK);
+  const targetChunkSize = Math.ceil(content.length / totalChunks);
+  
+  console.log(`📊 Target chunks: ${totalChunks}`);
+  console.log(`📏 Target chunk size: ${targetChunkSize.toLocaleString()} characters (~${estimateTokenCount(content.substring(0, targetChunkSize)).toLocaleString()} tokens)`);
+  
+  const chunks: DocumentChunk[] = [];
+  let startIndex = 0;
+  
+  for (let i = 0; i < totalChunks; i++) {
+    let endIndex = Math.min(startIndex + targetChunkSize, content.length);
+    
+    // Avoid splitting in the middle of words - find the last space or newline
+    if (endIndex < content.length) {
+      const lastSpace = content.lastIndexOf(' ', endIndex);
+      const lastNewline = content.lastIndexOf('\n', endIndex);
+      const lastBreak = Math.max(lastSpace, lastNewline);
+      
+      if (lastBreak > startIndex) {
+        endIndex = lastBreak;
+      }
+    }
+    
+    const chunkContent = content.substring(startIndex, endIndex).trim();
+    const chunkTokens = estimateTokenCount(chunkContent);
+    
+    console.log(`💾 Creating chunk ${i + 1}/${totalChunks}: ${chunkContent.length.toLocaleString()} chars, ${chunkTokens.toLocaleString()} tokens`);
+    
+    chunks.push({
+      content: chunkContent,
+      chunkIndex: i,
+      totalChunks: totalChunks,
+      frontmatter // Preserve frontmatter for prompt construction
+    });
+    
+    startIndex = endIndex;
+    
+    // If we've reached the end, break
+    if (startIndex >= content.length) {
+      break;
+    }
+  }
+  
+  console.log(`✅ Document chunking complete: ${chunks.length} chunks created`);
+  chunks.forEach((chunk, index) => {
+    const tokens = estimateTokenCount(chunk.content);
+    console.log(`  Chunk ${index + 1}: ${tokens.toLocaleString()} tokens`);
   });
-
+  
   return chunks;
 }
 
 function splitIntoSections(content: string): string[] {
+  console.log('✂️ Starting section splitting...');
+  console.log(`📄 Total content length: ${content.length.toLocaleString()} characters`);
+  
   // Split by major headings (# and ##) while preserving the heading with its content
   const sections: string[] = [];
   const lines = content.split('\n');
   let currentSection = '';
+  
+  console.log(`📝 Total lines in content: ${lines.length.toLocaleString()}`);
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     
     // If we hit a major heading and have accumulated content, save the current section
     if (line.match(/^##?\s+/) && currentSection.trim()) {
+      const sectionTokens = estimateTokenCount(currentSection);
+      console.log(`📤 Section completed: ${sectionTokens.toLocaleString()} tokens, heading: "${line.substring(0, 50)}..."`);
       sections.push(currentSection);
       currentSection = line + '\n';
     } else {
@@ -103,33 +136,63 @@ function splitIntoSections(content: string): string[] {
   
   // Add the last section
   if (currentSection.trim()) {
+    const finalSectionTokens = estimateTokenCount(currentSection);
+    console.log(`📤 Final section: ${finalSectionTokens.toLocaleString()} tokens`);
     sections.push(currentSection);
   }
+  
+  console.log(`✅ Section splitting complete: ${sections.length} sections created`);
+  sections.forEach((section, index) => {
+    const tokens = estimateTokenCount(section);
+    const preview = section.substring(0, 100).replace(/\n/g, ' ');
+    console.log(`  Section ${index + 1}: ${tokens.toLocaleString()} tokens - "${preview}..."`);
+  });
   
   return sections;
 }
 
 export function mergePhase2Results(results: Phase2Response[]): Phase2Response {
+  console.log(`🔀 Starting to merge ${results.length} Phase2 results...`);
+  
   const allCards = results.flatMap(result => result.cards);
+  console.log(`📊 Total cards before deduplication: ${allCards.length}`);
   
   // Remove duplicate cards based on title similarity
+  console.log('🔍 Checking for duplicate cards based on title similarity...');
   const uniqueCards = allCards.filter((card, index, arr) => {
-    return !arr.slice(0, index).some(existingCard => 
+    const isDuplicate = arr.slice(0, index).some(existingCard => 
       areTitlesSimilar(card.title, existingCard.title)
     );
+    
+    if (isDuplicate) {
+      console.log(`🗑️ Removing duplicate card: "${card.title}"`);
+    }
+    
+    return !isDuplicate;
   });
   
+  console.log(`📊 Unique cards after deduplication: ${uniqueCards.length}`);
+  console.log(`📊 Duplicates removed: ${allCards.length - uniqueCards.length}`);
+  
+  console.log('📝 Merging exhaustiveness notes...');
   const exhaustivenessNotes = results
     .map((result, index) => `Chunk ${index + 1}: ${result.exhaustiveness_notes}`)
     .filter(note => note.trim())
     .join('\n\n');
+  console.log(`📝 Combined exhaustiveness notes length: ${exhaustivenessNotes.length} characters`);
   
-  return {
+  const allComplete = results.every(result => result.complete);
+  console.log(`✅ All chunks marked as complete: ${allComplete}`);
+  
+  const mergedResult = {
     cards: uniqueCards,
     exhaustiveness_notes: exhaustivenessNotes,
-    complete: results.every(result => result.complete),
+    complete: allComplete,
     card_count: uniqueCards.length
   };
+  
+  console.log(`✅ Merge complete: ${mergedResult.card_count} final cards`);
+  return mergedResult;
 }
 
 function areTitlesSimilar(title1: string, title2: string): boolean {

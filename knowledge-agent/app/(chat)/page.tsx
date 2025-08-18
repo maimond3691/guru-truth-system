@@ -1,5 +1,5 @@
-import { Chat } from '@/components/chat';
-import { DataStreamHandler } from '@/components/data-stream-handler';
+import { Chat } from '@/components/main/chat';
+import { DataStreamHandler } from '@/components/data-stream/data-stream-handler';
 import { auth } from '../(auth)/auth';
 import { redirect } from 'next/navigation';
 import { generateUUID } from '@/lib/utils';

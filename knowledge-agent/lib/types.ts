@@ -8,7 +8,7 @@ import type { listFiles } from './ai/tools/list-files';
 import type { readFile } from './ai/tools/read-file';
 import type { InferUITool, UIMessage } from 'ai';
 
-import type { ArtifactKind } from '@/components/artifact';
+import type { ArtifactKind } from '@/components/artifact/artifact';
 import type { Suggestion } from './db/schema';
 import type { listGoogleDriveFiles } from './ai/tools/list-google-drive-files';
 import type { readGoogleDoc } from './ai/tools/read-google-doc';

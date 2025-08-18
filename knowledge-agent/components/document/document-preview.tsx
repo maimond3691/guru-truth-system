@@ -8,19 +8,19 @@ import {
   useMemo,
   useRef,
 } from 'react';
-import type { ArtifactKind, UIArtifact } from './artifact';
-import { FileIcon, FullscreenIcon, ImageIcon, LoaderIcon } from './icons';
+import type { ArtifactKind, UIArtifact } from '../artifact/artifact';
+import { FileIcon, FullscreenIcon, ImageIcon, LoaderIcon } from '../icons';
 import { cn, fetcher } from '@/lib/utils';
 import type { Document } from '@/lib/db/schema';
 import { InlineDocumentSkeleton } from './document-skeleton';
 import useSWR from 'swr';
-import { Editor } from './text-editor';
+import { Editor } from '../text-editor';
 import { DocumentToolCall, DocumentToolResult } from './document';
-import { CodeEditor } from './code-editor';
+import { CodeEditor } from '../code/code-editor';
 import { useArtifact } from '@/hooks/use-artifact';
 import equal from 'fast-deep-equal';
-import { SpreadsheetEditor } from './sheet-editor';
-import { ImageEditor } from './image-editor';
+import { SpreadsheetEditor } from '../sheet-editor';
+import { ImageEditor } from '../image-editor';
 
 interface DocumentPreviewProps {
   isReadonly: boolean;

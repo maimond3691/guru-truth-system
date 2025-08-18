@@ -32,7 +32,7 @@ import {
   workflowRun,
   type WorkflowRun,
 } from './schema';
-import type { ArtifactKind } from '@/components/artifact';
+import type { ArtifactKind } from '@/components/artifact/artifact';
 import { generateUUID } from '../utils';
 import { generateHashedPassword } from './utils';
 import { ChatSDKError } from '../errors';

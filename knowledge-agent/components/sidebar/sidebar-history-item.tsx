@@ -3,19 +3,19 @@ import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
-} from './ui/sidebar';
+} from '../ui/sidebar';
 import Link from 'next/link';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from './ui/dropdown-menu';
+} from '../ui/dropdown-menu';
 import {
   MoreHorizontalIcon,
   ShareIcon,
   TrashIcon,
-} from './icons';
+} from '../icons';
 import { memo } from 'react';
 
 const PureChatItem = ({

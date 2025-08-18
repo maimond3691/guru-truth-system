@@ -1,5 +1,5 @@
 import { Artifact } from '@/components/create-artifact';
-import { CodeEditor } from '@/components/code-editor';
+import { CodeEditor } from '@/components/code/code-editor';
 import {
   CopyIcon,
   LogsIcon,

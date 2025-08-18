@@ -16,7 +16,6 @@ import {
   generateUUID 
 } from '@/lib/utils';
 import { generateTitleFromUserMessage } from '@/app/(chat)/actions';
-import { processPhase2FromMarkdown } from '../phase2/service';
 
 export async function POST(request: Request) {
   try {
@@ -101,65 +100,49 @@ export async function POST(request: Request) {
       }
     }
 
-    const stream = createUIMessageStream<ChatMessage>({
-      async execute({ writer }) {
-        try {
-          // Show progress message immediately
-          const progressMsg: ChatMessage = {
-            id: generateUUID(),
-            role: 'assistant',
-            parts: [{ type: 'text', text: 'Generating Initial Guru Docs…' }],
-            metadata: { createdAt: new Date().toISOString() },
-          };
-          writer.write({ type: 'data-appendMessage', data: JSON.stringify(progressMsg), transient: true });
+    // Check if this message contains a markdown file for Phase 2 processing
+    const fileParts = (userMessage?.parts || []).filter((p: any) => (p as any).type === 'file') as any[];
+    const mdPart = fileParts.find((p: any) => {
+      const name = (p.name || '').toLowerCase();
+      const media = (p.mediaType || '').toLowerCase();
+      
+      // Check for various markdown file patterns
+      const nameContainsMd = name.includes('.md') || name.endsWith('.md') || name.endsWith('.markdown');
+      const mediaIsText = media.includes('markdown') || media === 'text/plain' || media === 'application/octet-stream';
+      
+      // Accept if name contains .md and media type is text-like
+      return nameContainsMd && mediaIsText;
+    });
+
+    // If markdown file detected, redirect to Phase 2 processing
+    if (mdPart) {
+      const stream = createUIMessageStream<ChatMessage>({
+        async execute({ writer }) {
           try {
-            const dbMsgs = convertUIMessagesToDBFormat([progressMsg], chatId).map(m => ({ ...m, createdAt: new Date() }));
-            await saveMessages({ messages: dbMsgs });
-          } catch {}
+            // Show Phase 2 progress message
+            const progressMsg: ChatMessage = {
+              id: generateUUID(),
+              role: 'assistant',
+              parts: [{ type: 'text', text: 'Generating Initial Guru Docs…' }],
+              metadata: { createdAt: new Date().toISOString() },
+            };
+            writer.write({ type: 'data-appendMessage', data: JSON.stringify(progressMsg), transient: true });
 
-          // Phase 2: detect markdown attachment and delegate to the phase service
-          const fileParts = (userMessage?.parts || []).filter((p: any) => (p as any).type === 'file') as any[];
-          const mdPart = fileParts.find((p: any) => {
-            const name = (p.name || '').toLowerCase();
-            const media = (p.mediaType || '').toLowerCase();
-            
-            // Check for various markdown file patterns
-            const nameContainsMd = name.includes('.md') || name.endsWith('.md') || name.endsWith('.markdown');
-            const mediaIsText = media.includes('markdown') || media === 'text/plain' || media === 'application/octet-stream';
-            
-            // Accept if name contains .md and media type is text-like
-            return nameContainsMd && mediaIsText;
-          });
+            // Forward to Phase 2 processing
+            const resp = await fetch(new URL('/api/workflow/phase2', request.url), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Cookie': request.headers.get('cookie') || '',
+              },
+              body: JSON.stringify({
+                chatId,
+                fileUrl: mdPart.url,
+                fileName: mdPart.name,
+              }),
+            });
 
-          if (mdPart) {
-            try {
-              const resp = await fetch((mdPart as any).url);
-              const rawContextMarkdown = await resp.text();
-              
-              if (rawContextMarkdown.trim()) {
-                const result = await processPhase2FromMarkdown({
-                  request,
-                  chatId,
-                  sessionUserId: session.user.id,
-                  markdown: rawContextMarkdown,
-                  writer,
-                });
-                
-                if (!result) {
-                  // If processPhase2FromMarkdown returns false, append an error message
-                  const errorMsg: ChatMessage = {
-                    id: generateUUID(),
-                    role: 'assistant',
-                    parts: [{ type: 'text', text: 'Sorry, there was an error processing your markdown file. Please try again.' }],
-                    metadata: { createdAt: new Date().toISOString() },
-                  };
-                  writer.write({ type: 'data-appendMessage', data: JSON.stringify(errorMsg), transient: true });
-                }
-              }
-            } catch (e) {
-              console.error('Phase 2 processing failed:', e);
-              
-              // Append an error message to the stream
+            if (!resp.ok) {
               const errorMsg: ChatMessage = {
                 id: generateUUID(),
                 role: 'assistant',
@@ -167,23 +150,70 @@ export async function POST(request: Request) {
                 metadata: { createdAt: new Date().toISOString() },
               };
               writer.write({ type: 'data-appendMessage', data: JSON.stringify(errorMsg), transient: true });
+              return;
             }
-          }
 
-          return;
-        } catch {
-          // Swallow errors; do not append any assistant message.
-        }
+            // Stream the Phase 2 response
+            if (resp.body) {
+              const reader = resp.body.getReader();
+              const decoder = new TextDecoder();
+
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+
+                  const chunk = decoder.decode(value);
+                  const lines = chunk.split('\n');
+
+                  for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                      try {
+                        const data = JSON.parse(line.slice(6));
+                        writer.write({ type: 'data-appendMessage', data: JSON.stringify(data), transient: true });
+                      } catch (e) {
+                        // Skip malformed lines
+                      }
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error('Error reading Phase 2 stream:', error);
+              }
+            }
+          } catch (error) {
+            console.error('Error in Phase 2 forwarding:', error);
+            const errorMsg: ChatMessage = {
+              id: generateUUID(),
+              role: 'assistant',
+              parts: [{ type: 'text', text: 'Sorry, there was an error processing your request.' }],
+              metadata: { createdAt: new Date().toISOString() },
+            };
+            writer.write({ type: 'data-appendMessage', data: JSON.stringify(errorMsg), transient: true });
+          }
+        },
+      });
+
+      return new Response(stream.pipeThrough(new JsonToSseTransformStream()), { status: 200 });
+    }
+
+    // For regular chat messages (no markdown files), return empty stream
+    // This allows the frontend to handle message display without backend processing
+    const stream = createUIMessageStream<ChatMessage>({
+      execute: () => {
+        // No processing needed for regular messages
+        // The frontend already has the message from the request
       },
     });
 
     return new Response(stream.pipeThrough(new JsonToSseTransformStream()), { status: 200 });
   } catch (error) {
+    console.error('Chat API error:', error);
     return new ChatSDKError('bad_request:api').toResponse();
   }
 }
 
-// PATCH endpoint for saving messages without triggering workflow
+// PATCH endpoint for saving messages without triggering processing
 export async function PATCH(request: Request) {
   try {
     const session = await auth();
@@ -256,4 +286,4 @@ export async function PATCH(request: Request) {
     console.error('Save messages API error:', error);
     return new ChatSDKError('bad_request:api').toResponse();
   }
-} 
+}

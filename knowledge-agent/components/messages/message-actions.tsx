@@ -1,13 +1,13 @@
 import { useCopyToClipboard } from 'usehooks-ts';
 
-import { CopyIcon } from './icons';
-import { Button } from './ui/button';
+import { CopyIcon } from '../icons';
+import { Button } from '../ui/button';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from './ui/tooltip';
+} from '../ui/tooltip';
 import { memo } from 'react';
 import equal from 'fast-deep-equal';
 import { toast } from 'sonner';
